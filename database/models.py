@@ -1,0 +1,114 @@
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+
+from .db import Base
+
+
+class Source(Base):
+    __tablename__ = "sources"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    base_url = Column(String)
+    language = Column(String)
+    country = Column(String)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class Link(Base):
+    __tablename__ = "links"
+
+    id = Column(Integer, primary_key=True)
+
+    source_id = Column(Integer, ForeignKey("sources.id"))
+    url = Column(String, unique=True)
+
+    status = Column(String, default="new")
+
+    discovered_at = Column(DateTime, default=func.now())
+    last_checked_at = Column(DateTime)
+
+    retry_count = Column(Integer, default=0)
+
+    error_message = Column(Text)
+
+    source = relationship("Source")
+
+
+class Article(Base):
+    __tablename__ = "articles"
+
+    id = Column(Integer, primary_key=True)
+
+    link_id = Column(Integer, ForeignKey("links.id"))
+    source_id = Column(Integer, ForeignKey("sources.id"))
+
+    title = Column(String)
+    author = Column(String)
+
+    publish_date = Column(DateTime)
+
+    raw_html = Column(Text)
+    clean_text = Column(Text)
+
+    content_hash = Column(String)
+    word_count = Column(Integer)
+
+    created_at = Column(DateTime, default=func.now())
+
+    link = relationship("Link")
+    source = relationship("Source")
+
+
+class AIProcessing(Base):
+    __tablename__ = "ai_processing"
+
+    id = Column(Integer, primary_key=True)
+
+    article_id = Column(Integer, ForeignKey("articles.id"))
+
+    model_name = Column(String)
+
+    summary = Column(Text)
+    category = Column(String)
+    tags = Column(String)
+
+    sentiment = Column(String)
+    importance_score = Column(Integer)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class PublishLog(Base):
+    __tablename__ = "publish_log"
+
+    id = Column(Integer, primary_key=True)
+
+    article_id = Column(Integer, ForeignKey("articles.id"))
+
+    platform = Column(String)
+
+    status = Column(String, default="pending")
+
+    published_url = Column(String)
+
+    error_message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True)
+
+    module = Column(String)
+
+    level = Column(String)
+
+    message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
