@@ -2,7 +2,7 @@ from discovery.crawler import get_news_links, save_links_to_db
 from utils.logger import Logger
 
 # Configs
-DISCOVERY_LIMIT = 12
+DISCOVERY_LIMIT = 15
 SOURCE_ID = 1
 
 logger = Logger(module="crawler_phase_1")
