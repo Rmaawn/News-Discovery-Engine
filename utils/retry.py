@@ -2,7 +2,7 @@ import time
 import requests
 
 
-def retry_on_error(max_retries=3, logger=None):
+def retry_on_error(max_retries=8, logger=None):
     """
     Decorator factory برای retry کردن تابع‌هایی که ممکن است خطاهای شبکه‌ای داشته باشند.
 
