@@ -17,7 +17,7 @@ MODEL_NAME = "gapgpt-qwen-3.5"
 client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
 
-@retry_on_error(max_retries=5, logger=logger)
+@retry_on_error(max_retries=8, logger=logger)
 def call_ai_for_rewrite(title: str, content: str) -> str:
     """
     ارسال درخواست به هوش مصنوعی و دریافت خروجی JSON (به صورت string).

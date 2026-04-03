@@ -1,9 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-
 from database.db import SessionLocal
 from database.models import Link
+from utils.logger import Logger
+
+logger = Logger(module="crawler_phase_1")
+
 
 BASE_URL = "https://www.tasnimnews.ir/fa/news/overview/popular"
 
@@ -76,14 +79,24 @@ def save_links_to_db(links, source_id=1):
     new_links = 0
 
     for url in links:
-        link = Link(url=url, source_id=source_id)
+            existing = db.query(Link).filter(Link.url == url).first()
+            if existing:
+                # اگر می‌خواهی ببینی چند تا تکراری‌اند، می‌تونی لاگ بگذاری:
+                # logger.info(f"Duplicate link skipped: {url}")
+                continue
 
-        try:
-            db.add(link)
-            db.commit()
-            new_links += 1
-        except Exception:
-            db.rollback()
 
-    db.close()
+            link = Link(url=url, source_id=source_id)
+
+            try:
+                db.add(link)
+                db.commit()
+                new_links += 1
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error saving link {url}: {e}")
+            finally:
+                db.close()
+
     print(f"{new_links} new links saved")
+    logger.info(f"{new_links} new links saved")
