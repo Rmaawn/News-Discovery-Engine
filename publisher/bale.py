@@ -24,6 +24,8 @@ def build_bale_text(title: str, content: str, source_url: Optional[str] = None) 
     """
     parts = []
 
+    parts.append(TITLE_PREFIX)
+
     if title:
         # عنوان را بولد می‌کنیم
         parts.append(f"{title}\n")
@@ -32,7 +34,10 @@ def build_bale_text(title: str, content: str, source_url: Optional[str] = None) 
         parts.append(content.strip())
 
     if source_url:
-        parts.append(f"\n\nمنبع: {"tadnanews.ir"}")
+        parts.append(f"\n\nمنبع: tadnanews.ir")
+
+
+    parts.append("\n\n" + FOOTER_TEXT)
 
     return "\n".join(parts).strip()
 
