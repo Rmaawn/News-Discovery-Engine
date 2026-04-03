@@ -24,6 +24,9 @@ def is_news_link(href: str) -> bool:
     # فعلاً ساده: فقط لینک‌های بخش /fa/news/ و حذف overview
     if "/fa/news/overview/" in href:
         return False
+    
+    if "/fa/media/" in href:
+        return False
 
     return "/fa/news/" in href
 
