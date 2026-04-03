@@ -68,18 +68,18 @@ class AIProcessing(Base):
 
     id = Column(Integer, primary_key=True)
 
+    # خبر اصلی که این بازنویسی مربوط به آن است
     article_id = Column(Integer, ForeignKey("articles.id"))
 
-    model_name = Column(String)
-
-    summary = Column(Text)
-    category = Column(String)
-    tags = Column(String)
-
-    sentiment = Column(String)
-    importance_score = Column(Integer)
+    # خروجی فاز سوم: عنوان بازنویسی‌شده و متن بازنویسی‌شده
+    rewritten_title = Column(Text)
+    rewritten_content = Column(Text)
 
     created_at = Column(DateTime, default=func.now())
+
+    # (اختیاری ولی مفید برای آینده: رابطه با Article)
+    # اگر نخواستی، می‌تونی این خط رو حذف کنی
+    article = relationship("Article")
 
 
 class PublishLog(Base):
