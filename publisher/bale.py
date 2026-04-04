@@ -14,8 +14,9 @@ BALE_BASE_URL = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}"
 SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
 # ============================================
 
-TITLE_PREFIX = "🆎🆎\n\n"
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n\n📢 آدرس کانال بله: @tadnanews\n\n🌐 آدرس رسمی وب سایت: tadnanews.ir"
+TITLE_PREFIX = "🆎🆎"
+# FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n\n📢 آدرس کانال بله: @tadnanews\n\n🌐 آدرس رسمی وب سایت: tadnanews.ir"
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
 
 def build_bale_text(title: str, content: str, source_url: Optional[str] = None) -> str:
     """
@@ -28,13 +29,14 @@ def build_bale_text(title: str, content: str, source_url: Optional[str] = None) 
 
     if title:
         # عنوان را بولد می‌کنیم
-        parts.append(f"{title}\n")
+        parts.append(f"🔴 *{title}*\n")
 
     if content:
         parts.append(content.strip())
 
-    if source_url:
-        parts.append(f"\n\nمنبع: tadnanews.ir")
+
+    # if source_url:
+    #     parts.append(f"\n\nمنبع: tadnanews.ir")
 
 
     parts.append("\n\n" + FOOTER_TEXT)
