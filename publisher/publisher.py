@@ -99,7 +99,10 @@ def publish_to_bale(limit: int = 10):
             try:
                 # ارسال به بله
                 result = send_article_to_bale(
-                    title=title, content=content, source_url=source_url
+                    title=title,
+                    content=content, 
+                    image_url=article.image_url,
+                    source_url=source_url
                 )
 
                 # سعی می‌کنیم اطلاعاتی مثل message_id را ذخیره کنیم

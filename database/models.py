@@ -54,6 +54,8 @@ class Article(Base):
     raw_html = Column(Text)
     clean_text = Column(Text)
 
+    image_url = Column(String)
+
     content_hash = Column(String)
     word_count = Column(Integer)
 

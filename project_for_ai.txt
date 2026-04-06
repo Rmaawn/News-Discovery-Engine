@@ -1,0 +1,974 @@
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\ai\rewrite.py
+==============================
+import json
+from openai import OpenAI
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+logger = Logger(module="ai_phase_3")
+
+# --- Configs ---
+API_KEY = 'sk-uPTN8OTEZEa5zOABATW3ARmZdPFJnGBjnxS8F0CexPkGH2AG'
+BASE_URL = 'https://api.gapgpt.app/v1'
+MODEL_NAME = "gapgpt-qwen-3.5"
+# -----------------
+
+client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def call_ai_for_rewrite(title: str, content: str) -> str:
+    """
+    ارسال درخواست به هوش مصنوعی و دریافت خروجی JSON (به صورت string).
+
+    به کمک دکوریتور retry_on_error:
+    - روی خطاهای شبکه‌ای (timeout، connection، 5xx و ...) تا 5 بار با فاصله
+      افزایشی تلاش می‌کند.
+    - در صورت خطای غیرشبکه‌ای (مثلاً باگ داخلی) فقط لاگ می‌زند و همان دفعه اول raise می‌شود.
+    """
+    system_prompt = """
+    شما یک خبرنگار و ویراستار حرفه‌ای هستید.
+    وظیفه شما بازنویسی عنوان و متن خبر است تا جذاب‌تر، روان‌تر و کاملاً غیرتکراری (یونیک) شود.
+
+    قوانین را دقیقاً رعایت کنید:
+    - فقط روی بازنویسی تمرکز کنید و از خودتان خبر جدید نسازید.
+    - لحن را خبری و حرفه‌ای نگه دارید.
+    - طول متن نهایی خبر باید بین 100 تا 750 کاراکتر باشد (نه کمتر و نه بیشتر).
+    - در صورت امکان متن خبر را در چند خط کوتاه بنویسید.
+    - ابتدای هر خط از متن خبر از ایموجی 🔹 استفاده کنید.
+    - متن را واضح، فشرده و خوانا بنویسید و از حاشیه‌پردازی خودداری کنید.
+    - پس از پایان متن خبر، یک خط خالی ایجاد کنید و در خط بعدی 1 یا 2 هشتگ مرتبط و کلی با موضوع خبر اضافه کنید (مانند: #اقتصاد #فناوری).
+
+    هیچ توضیح اضافه‌ای ندهید. خروجی باید فقط و فقط یک آبجکت JSON معتبر با ساختار زیر باشد:
+
+    {
+        "title": "عنوان جدید و جذاب خبر",
+        "content": "متن بازنویسی شده خبر که ابتدای هر خط آن با 🔹 شروع می‌شود و در انتهای آن پس از یک خط فاصله، 1 یا 2 هشتگ مرتبط قرار می‌گیرد"
+    }
+    """.strip()
+
+
+
+
+    user_prompt = f"عنوان خبر اصلی:\n{title}\n\nمتن خبر اصلی:\n{content}"
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7,
+        # این خط مدل را مجبور به خروجی JSON معتبر می‌کند
+        response_format={"type": "json_object"}
+    )
+
+    # در این مرحله اگر خطای شبکه‌ای بود، exception بالا می‌رود و
+    # توسط retry_on_error مدیریت می‌شود.
+    return response.choices[0].message.content
+
+
+def process_articles_with_ai(limit: int = 5):
+    """
+    پردازش اخباری که هنوز رکوردی در AIProcessing ندارند
+    و ذخیره نسخه بازنویسی‌شده در جدول ai_processing.
+    """
+    session = SessionLocal()
+
+    try:
+        # تمام Articleهایی که هنوز برایشان پردازش AI ثبت نشده
+        unprocessed_articles = (
+            session.query(Article)
+            .outerjoin(AIProcessing, AIProcessing.article_id == Article.id)
+            .filter(AIProcessing.id == None)  # noqa: E711
+            .limit(limit)
+            .all()
+        )
+
+        if not unprocessed_articles:
+            logger.info("No new articles to process for AI.")
+            return
+
+        for article in unprocessed_articles:
+            logger.info(f"AI Processing started for Article ID: {article.id}")
+
+            # متن اصلی را از title و clean_text می‌گیریم
+            original_title = article.title or ""
+            original_content = article.clean_text or ""
+
+            # اگر متن خالی باشد، عملاً چیزی برای بازنویسی نداریم
+            if not original_content.strip():
+                logger.warning(
+                    f"Article {article.id} has empty clean_text. Skipping."
+                )
+                continue
+
+            try:
+                # ممکن است چند بار به خاطر retry دوباره اجرا شود
+                ai_result_str = call_ai_for_rewrite(
+                    original_title, original_content
+                )
+
+            except Exception as e:
+                # بعد از اتمام تمام retryها (یا خطای غیرشبکه‌ای) به اینجا می‌رسیم
+                logger.error(
+                    f"AI request failed for Article {article.id}: {str(e)}"
+                )
+                continue
+
+            if not ai_result_str:
+                logger.warning(
+                    f"Empty response from AI for Article {article.id}. Skipping."
+                )
+                continue
+
+            # حالا خروجی تضمین شده JSON است، ولی باز هم برای اطمینان parse می‌کنیم
+            try:
+                parsed_data = json.loads(ai_result_str)
+
+                new_title = parsed_data.get("title")
+                new_content = parsed_data.get("content")
+
+                if not new_title or not new_content:
+                    raise ValueError(
+                        "Missing 'title' or 'content' in JSON output"
+                    )
+
+                ai_record = AIProcessing(
+                    article_id=article.id,
+                    rewritten_title=new_title,
+                    rewritten_content=new_content,
+                )
+
+                session.add(ai_record)
+                session.commit()
+
+                logger.success(
+                    f"Article {article.id} successfully rewritten and saved."
+                )
+
+            except (json.JSONDecodeError, ValueError) as parse_error:
+                logger.error(
+                    f"Failed to parse AI output for Article {article.id}. "
+                    f"Error: {parse_error}. Raw Output: {ai_result_str}"
+                )
+                session.rollback()
+
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error while saving AI result for Article "
+                    f"{article.id}: {str(e)}"
+                )
+                session.rollback()
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in AI Processing: {str(e)}")
+
+    finally:
+        session.close()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\database\db.py
+==============================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+DATABASE_URL = "sqlite:///news.db"
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+Base = declarative_base()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\database\models.py
+==============================
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+
+from .db import Base
+
+
+class Source(Base):
+    __tablename__ = "sources"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    base_url = Column(String)
+    language = Column(String)
+    country = Column(String)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class Link(Base):
+    __tablename__ = "links"
+
+    id = Column(Integer, primary_key=True)
+
+    source_id = Column(Integer, ForeignKey("sources.id"))
+    url = Column(String, unique=True)
+
+    status = Column(String, default="new")
+
+    discovered_at = Column(DateTime, default=func.now())
+    last_checked_at = Column(DateTime)
+
+    retry_count = Column(Integer, default=0)
+
+    error_message = Column(Text)
+
+    source = relationship("Source")
+
+
+class Article(Base):
+    __tablename__ = "articles"
+
+    id = Column(Integer, primary_key=True)
+
+    link_id = Column(Integer, ForeignKey("links.id"))
+    source_id = Column(Integer, ForeignKey("sources.id"))
+
+    title = Column(String)
+    author = Column(String)
+
+    publish_date = Column(DateTime)
+
+    raw_html = Column(Text)
+    clean_text = Column(Text)
+
+    content_hash = Column(String)
+    word_count = Column(Integer)
+
+    created_at = Column(DateTime, default=func.now())
+
+    link = relationship("Link")
+    source = relationship("Source")
+
+
+class AIProcessing(Base):
+    __tablename__ = "ai_processing"
+
+    id = Column(Integer, primary_key=True)
+
+    # خبر اصلی که این بازنویسی مربوط به آن است
+    article_id = Column(Integer, ForeignKey("articles.id"))
+
+    # خروجی فاز سوم: عنوان بازنویسی‌شده و متن بازنویسی‌شده
+    rewritten_title = Column(Text)
+    rewritten_content = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+    # (اختیاری ولی مفید برای آینده: رابطه با Article)
+    # اگر نخواستی، می‌تونی این خط رو حذف کنی
+    article = relationship("Article")
+
+
+class PublishLog(Base):
+    __tablename__ = "publish_log"
+
+    id = Column(Integer, primary_key=True)
+
+    article_id = Column(Integer, ForeignKey("articles.id"))
+
+    platform = Column(String)
+
+    status = Column(String, default="pending")
+
+    published_url = Column(String)
+
+    error_message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True)
+
+    module = Column(String)
+
+    level = Column(String)
+
+    message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\discovery\crawler.py
+==============================
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+from database.db import SessionLocal
+from database.models import Link
+from utils.logger import Logger
+
+logger = Logger(module="crawler_phase_1")
+
+
+BASE_URL = "https://www.tasnimnews.ir/fa/news/overview/popular"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+
+def is_news_link(href: str) -> bool:
+    if not href:
+        return False
+
+    href = href.strip()
+
+    if href.startswith("#") or href.lower().startswith("javascript"):
+        return False
+
+    # فعلاً ساده: فقط لینک‌های بخش /fa/news/ و حذف overview
+    if "/fa/news/overview/" in href:
+        return False
+    
+    if "/fa/media/" in href:
+        return False
+
+    return "/fa/news/" in href
+
+
+def get_news_links(limit=100):
+    response = requests.get(BASE_URL, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # پیدا کردن باکس «پربیننده ها»
+    popular_section = None
+    for sec in soup.select("section.news-container.news-box"):
+        title_el = sec.select_one("header span.title")
+        if title_el and title_el.get_text(strip=True) == "پربیننده ها":
+            popular_section = sec
+            break
+
+    if popular_section is None:
+        # اگر باکس پیدا نشد، چیزی برنمی‌گردونیم
+        return []
+
+    links_set = set()
+    links = []
+
+    # فقط لینک‌های داخل همین باکس
+    for a in popular_section.select("section.content article.box-item a[href]"):
+        href = a["href"].strip()
+
+        if not is_news_link(href):
+            continue
+
+        full_url = urljoin(BASE_URL, href)
+
+        if full_url not in links_set:
+            links_set.add(full_url)
+            links.append(full_url)
+
+        if len(links) >= limit:
+            break
+
+    return links
+
+
+def save_links_to_db(links, source_id=1):
+    db = SessionLocal()
+    new_links = 0
+
+    for url in links:
+            existing = db.query(Link).filter(Link.url == url).first()
+            if existing:
+                # اگر می‌خواهی ببینی چند تا تکراری‌اند، می‌تونی لاگ بگذاری:
+                # logger.info(f"Duplicate link skipped: {url}")
+                continue
+
+
+            link = Link(url=url, source_id=source_id)
+
+            try:
+                db.add(link)
+                db.commit()
+                new_links += 1
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error saving link {url}: {e}")
+            finally:
+                db.close()
+
+    print(f"{new_links} new links saved")
+    logger.info(f"{new_links} new links saved")
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\init_db.py
+==============================
+from database.db import engine
+from database.models import Base
+
+Base.metadata.create_all(bind=engine)
+
+print("Database initialized")
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\bale.py
+==============================
+# publisher/bale.py
+import requests
+from typing import Optional, Dict, Any
+
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+logger = Logger(module="bale_client_phase_4")
+
+# === تنظیمات بله (مقدارها را خودت تنظیم کن) ===
+BALE_BOT_TOKEN = "862673997:tcQaftNRkYDws4cIhsX6x4O_0sYSGHubHko"
+BALE_CHANNEL_ID = "@tadnatest"
+BALE_BASE_URL = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}"
+SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
+# ============================================
+
+TITLE_PREFIX = "🆎🆎"
+# FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n\n📢 آدرس کانال بله: @tadnanews\n\n🌐 آدرس رسمی وب سایت: tadnanews.ir"
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
+
+def build_bale_text(title: str, content: str, source_url: Optional[str] = None) -> str:
+    """
+    ساخت متن نهایی برای ارسال در کانال بله.
+    می‌توانی استایل را هر طور دوست داری عوض کنی.
+    """
+    parts = []
+
+    parts.append(TITLE_PREFIX)
+
+    if title:
+        # عنوان را بولد می‌کنیم
+        parts.append(f"🔴 *{title}*\n")
+
+    if content:
+        parts.append(content.strip())
+
+
+    # if source_url:
+    #     parts.append(f"\n\nمنبع: tadnanews.ir")
+
+
+    parts.append("\n\n" + FOOTER_TEXT)
+
+    return "\n".join(parts).strip()
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def send_message(
+    chat_id: str,
+    text: str,
+    parse_mode: str = "HTML",
+    disable_web_page_preview: bool = False,
+) -> Dict[str, Any]:
+    """
+    ارسال پیام به بله با استفاده از API رسمی.
+    در صورت بروز خطاهای شبکه‌ای، با دکوریتور retry_on_error مجددا تلاش می‌کند.
+    """
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": disable_web_page_preview,
+    }
+
+    response = requests.post(SEND_MESSAGE_ENDPOINT, json=payload, timeout=30)
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not data.get("ok", False):
+        # خطای منطقی از سمت API بله (مثلا chat_id اشتباه)
+        raise RuntimeError(f"Bale API error: {data}")
+
+    return data
+
+
+def send_article_to_bale(
+    title: str,
+    content: str,
+    source_url: Optional[str] = None,
+    chat_id: str = BALE_CHANNEL_ID,
+) -> Dict[str, Any]:
+    """
+    ترکیب‌کننده: متن را می‌سازد و پیام را ارسال می‌کند.
+    """
+    text = build_bale_text(title, content, source_url=source_url)
+    logger.info(f"Sending article to Bale channel: {chat_id}")
+    result = send_message(chat_id=chat_id, text=text)
+    logger.success("Article sent to Bale successfully.")
+    return result
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\publisher.py
+==============================
+# publisher/publisher.py
+from typing import List, Tuple, Optional
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing, PublishLog, Link
+from utils.logger import Logger
+from publisher.bale import send_article_to_bale
+
+logger = Logger(module="publisher_phase_4")
+
+
+def get_unpublished_ai_articles(
+    limit: int = 10, platform: str = "bale"
+) -> List[Tuple[Article, AIProcessing, Optional[Link]]]:
+    """
+    برگرداندن لیست خبرهایی که:
+      - نسخه بازنویسی شده (AIProcessing) دارند
+      - هنوز برای platform مورد نظر با status='success' منتشر نشده‌اند
+
+    خروجی: لیستی از تاپل (Article, AIProcessing, Link)
+    """
+    session = SessionLocal()
+
+    try:
+        # زیرکوئری برای آیدی مقاله‌هایی که قبلاً با موفقیت روی این پلتفرم منتشر شده‌اند
+        from sqlalchemy import exists, and_
+
+        subquery_published = (
+            session.query(PublishLog.article_id)
+            .filter(
+                PublishLog.platform == platform,
+                PublishLog.status == "success",
+            )
+            .subquery()
+        )
+
+        # گرفتن Article + AIProcessing + Link
+        query = (
+            session.query(Article, AIProcessing, Link)
+            .join(AIProcessing, AIProcessing.article_id == Article.id)
+            .join(Link, Link.id == Article.link_id)
+            .filter(~Article.id.in_(subquery_published))  # NOT IN
+            .order_by(Article.id.asc())
+            .limit(limit)
+        )
+
+        results = query.all()
+        return results
+
+    except Exception as e:
+        logger.error(f"Error fetching unpublished AI articles: {str(e)}")
+        return []
+
+    finally:
+        session.close()
+
+
+def publish_to_bale(limit: int = 10):
+    """
+    پردازش خبرهای بازنویسی شده و انتشار آن‌ها در کانال بله.
+    برای هر خبر یک رکورد در PublishLog ثبت می‌کند.
+    """
+    session = SessionLocal()
+
+    try:
+        items = get_unpublished_ai_articles(limit=limit, platform="bale")
+
+        if not items:
+            logger.info("No AI-processed articles to publish on Bale.")
+            return
+
+        logger.info(f"{len(items)} articles found for Bale publishing.")
+
+        for article, ai_proc, link in items:
+            logger.info(
+                f"Publishing Article ID {article.id} (AIProcessing ID {ai_proc.id})"
+            )
+
+            # متن نهایی برای انتشار
+            title = ai_proc.rewritten_title or article.title or ""
+            content = ai_proc.rewritten_content or ""
+            source_url = link.url if link else None
+
+            if not content.strip():
+                logger.warning(
+                    f"Article {article.id} has empty rewritten_content. Skipping."
+                )
+                # ثبت لاگ انتشار با وضعیت failed به دلیل محتوای خالی
+                publish_log = PublishLog(
+                    article_id=article.id,
+                    platform="bale",
+                    status="failed",
+                    error_message="Empty rewritten_content",
+                )
+                session.add(publish_log)
+                session.commit()
+                continue
+
+            try:
+                # ارسال به بله
+                result = send_article_to_bale(
+                    title=title, content=content, source_url=source_url
+                )
+
+                # سعی می‌کنیم اطلاعاتی مثل message_id را ذخیره کنیم
+                message = result.get("result")
+                published_url = None
+
+                if isinstance(message, dict):
+                    # خیلی از Bot API ها message_id را دارند
+                    msg_id = message.get("message_id")
+                    chat = message.get("chat", {})
+                    chat_id = chat.get("id")
+                    # اگر ساختار URL منتشر شده برای بله را می‌دانستی، اینجا می‌بستی.
+                    # برای الان، message_id و chat_id را در published_url ذخیره می‌کنیم.
+                    if msg_id and chat_id:
+                        published_url = f"chat_id={chat_id}, message_id={msg_id}"
+
+                publish_log = PublishLog(
+                    article_id=article.id,
+                    platform="bale",
+                    status="success",
+                    published_url=published_url,
+                )
+                session.add(publish_log)
+                session.commit()
+
+                logger.success(
+                    f"Article {article.id} published on Bale successfully."
+                )
+
+            except Exception as e:
+                # در صورت خطا در ارسال یا پاسخ API
+                logger.error(
+                    f"Failed to publish Article {article.id} on Bale: {str(e)}"
+                )
+                session.rollback()
+
+                # ثبت در PublishLog
+                try:
+                    publish_log = PublishLog(
+                        article_id=article.id,
+                        platform="bale",
+                        status="failed",
+                        error_message=str(e),
+                    )
+                    session.add(publish_log)
+                    session.commit()
+                except Exception as e_log:
+                    logger.error(
+                        f"Failed to save PublishLog for Article {article.id}: {str(e_log)}"
+                    )
+                    session.rollback()
+
+    except Exception as e:
+        logger.error(f"Unexpected error in Bale publishing pipeline: {str(e)}")
+
+    finally:
+        session.close()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\wordpress.py
+==============================
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_01_crawler.py
+==============================
+from discovery.crawler import get_news_links, save_links_to_db
+from utils.logger import Logger
+
+# Configs
+DISCOVERY_LIMIT = 15
+SOURCE_ID = 1
+
+logger = Logger(module="crawler_phase_1")
+
+def run():
+    logger.info(f"Starting discovery... (Limit: {DISCOVERY_LIMIT})")
+    
+    links = get_news_links(limit=DISCOVERY_LIMIT)
+    
+    if not links:
+        logger.warning("No new links found.")
+        return
+        
+    logger.success(f"{len(links)} links discovered. Saving to DB...")
+    save_links_to_db(links, source_id=SOURCE_ID)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_02_scraper.py
+==============================
+from scraper.fetcher import process_new_links
+from utils.logger import Logger
+
+# Configs
+FETCH_LIMIT = 12
+
+logger = Logger(module="scraper_phase_2")
+
+def run():
+    logger.info(f"Starting content extraction... (Limit: {FETCH_LIMIT})")
+    process_new_links(limit=FETCH_LIMIT)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_03_ai.py
+==============================
+from ai.rewrite import process_articles_with_ai
+from utils.logger import Logger
+
+# Configs
+AI_PROCESS_LIMIT = 12  # در هر بار اجرا چند خبر به هوش مصنوعی ارسال شود؟
+
+logger = Logger(module="ai_phase_3")
+
+def run():
+    logger.info(f"Starting AI rewriting... (Limit: {AI_PROCESS_LIMIT})")
+    process_articles_with_ai(limit=AI_PROCESS_LIMIT)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_04_publisher.py
+==============================
+# run_04_publisher.py
+from publisher.publisher import publish_to_bale
+from utils.logger import Logger
+
+# Configs
+PUBLISH_LIMIT = 12  # در هر اجرا چند خبر منتشر شود؟
+
+logger = Logger(module="publisher_phase_4")
+
+def run():
+    logger.info(f"Starting Bale publishing... (Limit: {PUBLISH_LIMIT})")
+    publish_to_bale(limit=PUBLISH_LIMIT)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\extractor.py
+==============================
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\fetcher.py
+==============================
+import requests
+import hashlib
+from datetime import datetime
+from bs4 import BeautifulSoup
+
+from database.db import SessionLocal
+from database.models import Link, Article
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+
+def fetch_article(link_id, url):
+    """دانلود و استخراج محتوای یک خبر"""
+    
+    db = SessionLocal()
+    
+    try:
+        # آپدیت وضعیت به fetching
+        link = db.query(Link).filter(Link.id == link_id).first()
+        link.status = "fetching"
+        link.last_checked_at = datetime.now()
+        db.commit()
+        
+        # دانلود صفحه
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        
+        html = response.text
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # استخراج عنوان
+        title_tag = soup.find("h1", class_="title")
+        title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
+        
+        # استخراج متن خبر
+        story_div = soup.find("div", class_="story")
+        if story_div:
+            # حذف تگ‌های اضافی
+            for tag in story_div.find_all(["script", "style", "aside"]):
+                tag.decompose()
+            clean_text = story_div.get_text(separator="\n", strip=True)
+        else:
+            clean_text = ""
+        
+        # محاسبه hash برای تشخیص تکراری
+        content_hash = hashlib.md5(clean_text.encode()).hexdigest()
+        
+        # شمارش کلمات
+        word_count = len(clean_text.split())
+        
+        # ذخیره در articles
+        article = Article(
+            link_id=link_id,
+            source_id=link.source_id,
+            title=title,
+            raw_html=html,
+            clean_text=clean_text,
+            content_hash=content_hash,
+            word_count=word_count
+        )
+        
+        db.add(article)
+        
+        # آپدیت وضعیت لینک به fetched
+        link.status = "fetched"
+        db.commit()
+        
+        print(f"✅ {title[:50]}...")
+        return True
+        
+    except Exception as e:
+        # در صورت خطا
+        link = db.query(Link).filter(Link.id == link_id).first()
+        link.status = "failed"
+        link.error_message = str(e)
+        link.retry_count += 1
+        db.commit()
+        
+        print(f"❌ Error: {str(e)[:50]}")
+        return False
+        
+    finally:
+        db.close()
+
+
+def process_new_links(limit=10):
+    """پردازش لینک‌های جدید"""
+    
+    db = SessionLocal()
+    
+    # گرفتن لینک‌های new
+    links = db.query(Link).filter(Link.status == "new").limit(limit).all()
+    
+    db.close()
+    
+    print(f"\n🔄 Processing {len(links)} links...\n")
+    
+    success = 0
+    for link in links:
+        if fetch_article(link.id, link.url):
+            success += 1
+    
+    print(f"\n✅ {success}/{len(links)} articles fetched successfully")
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\logger.py
+==============================
+from database.db import SessionLocal
+from database.models import SystemLog
+
+class Logger:
+    COLORS = {
+        'INFO': '\033[94m',
+        'SUCCESS': '\033[92m',
+        'WARNING': '\033[93m',
+        'ERROR': '\033[91m',
+        'RESET': '\033[0m'
+    }
+
+    def __init__(self, module="system"):
+        self.module = module
+    
+    def _log(self, level, message):
+        session = SessionLocal()
+        try:
+            log = SystemLog(module=self.module, level=level, message=message)
+            session.add(log)
+            session.commit()
+        except Exception:
+            pass # Prevent DB errors from crashing the app
+        finally:
+            session.close()
+            
+        color = self.COLORS.get(level, self.COLORS['RESET'])
+        print(f"{color}[{level}] [{self.module}] {message}{self.COLORS['RESET']}")
+    
+    def info(self, message):
+        self._log('INFO', message)
+    
+    def success(self, message):
+        self._log('SUCCESS', message)
+    
+    def warning(self, message):
+        self._log('WARNING', message)
+    
+    def error(self, message):
+        self._log('ERROR', message)
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\retry.py
+==============================
+import time
+import requests
+
+
+def retry_on_error(max_retries=8, logger=None):
+    """
+    Decorator factory برای retry کردن تابع‌هایی که ممکن است خطاهای شبکه‌ای داشته باشند.
+
+    استفاده:
+    @retry_on_error(max_retries=5, logger=my_logger)
+    def my_func(...):
+        ...
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.RequestException as e:  # خطاهای شبکه/timeout
+                    if attempt < max_retries - 1:
+                        wait = (attempt + 1) * 10
+                        if logger:
+                            logger.warning(
+                                f"Network error in {func.__name__}: {e}. "
+                                f"Retrying in {wait}s ({attempt + 1}/{max_retries})"
+                            )
+                        time.sleep(wait)
+                    else:
+                        if logger:
+                            logger.error(
+                                f"Max retries reached for {func.__name__}: {e}"
+                            )
+                        raise
+                except Exception as e:
+                    # خطاهای غیرشبکه‌ای را retry نمی‌کنیم
+                    if logger:
+                        logger.error(
+                            f"Error in {func.__name__}: {str(e)}"
+                        )
+                    raise
+        return wrapper
+    return decorator
+

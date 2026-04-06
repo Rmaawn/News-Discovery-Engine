@@ -34,6 +34,16 @@ def fetch_article(link_id, url):
         title_tag = soup.find("h1", class_="title")
         title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
         
+        # استخراج تصویر
+        image_url = None
+        img_tag = soup.find("img", class_="img-responsive")
+        if img_tag and img_tag.get("src"):
+            image_url = img_tag["src"]
+            # اگر لینک نسبی بود، کامل کن
+            if image_url and not image_url.startswith("http"):
+                from urllib.parse import urljoin
+                image_url = urljoin(url, image_url)      
+        
         # استخراج متن خبر
         story_div = soup.find("div", class_="story")
         if story_div:
@@ -57,6 +67,7 @@ def fetch_article(link_id, url):
             title=title,
             raw_html=html,
             clean_text=clean_text,
+            image_url=image_url,
             content_hash=content_hash,
             word_count=word_count
         )
