@@ -1,102 +1,76 @@
+# discovery/crawler.py
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
 from database.db import SessionLocal
-from database.models import Link
+from database.models import Link, Source
 from utils.logger import Logger
+from discovery.sources import SOURCES
 
 logger = Logger(module="crawler_phase_1")
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
-BASE_URL = "https://www.tasnimnews.ir/fa/news/overview/popular"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
-
-
-def is_news_link(href: str) -> bool:
-    if not href:
-        return False
-
-    href = href.strip()
-
-    if href.startswith("#") or href.lower().startswith("javascript"):
-        return False
-
-    # فعلاً ساده: فقط لینک‌های بخش /fa/news/ و حذف overview
-    if "/fa/news/overview/" in href:
-        return False
-    
-    if "/fa/media/" in href:
-        return False
-
-    return "/fa/news/" in href
-
-
-def get_news_links(limit=100):
-    response = requests.get(BASE_URL, headers=HEADERS, timeout=30)
+def get_news_links(source: dict, limit: int = 100) -> list:
+    response = requests.get(source["url"], headers=HEADERS, timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+    base_url = source.get("base_url", source["url"])
 
-    # پیدا کردن باکس «پربیننده ها»
-    popular_section = None
-    for sec in soup.select("section.news-container.news-box"):
-        title_el = sec.select_one("header span.title")
-        if title_el and title_el.get_text(strip=True) == "پربیننده ها":
-            popular_section = sec
-            break
-
-    if popular_section is None:
-        # اگر باکس پیدا نشد، چیزی برنمی‌گردونیم
-        return []
+    # اگر section_filter داشت، اول section رو پیدا کن
+    search_root = soup
+    if source.get("section_selector") and source.get("section_filter"):
+        for sec in soup.select(source["section_selector"]):
+            if source["section_filter"](sec):
+                search_root = sec
+                break
 
     links_set = set()
     links = []
 
-    # فقط لینک‌های داخل همین باکس
-    for a in popular_section.select("section.content article.box-item a[href]"):
-        href = a["href"].strip()
-
-        if not is_news_link(href):
+    for a in search_root.select(source["link_selector"]):
+        href = a.get("href", "").strip()
+        if not href or not source["link_filter"](href):
             continue
-
-        full_url = urljoin(BASE_URL, href)
-
+        full_url = urljoin(base_url, href)
         if full_url not in links_set:
             links_set.add(full_url)
             links.append(full_url)
-
         if len(links) >= limit:
             break
 
     return links
 
 
-def save_links_to_db(links, source_id=1):
+def save_links_to_db(links: list, source_id: int):
     db = SessionLocal()
     new_links = 0
 
     for url in links:
-            existing = db.query(Link).filter(Link.url == url).first()
-            if existing:
-                # اگر می‌خواهی ببینی چند تا تکراری‌اند، می‌تونی لاگ بگذاری:
-                # logger.info(f"Duplicate link skipped: {url}")
-                continue
+        if db.query(Link).filter(Link.url == url).first():
+            continue
+        try:
+            db.add(Link(url=url, source_id=source_id))
+            db.commit()
+            new_links += 1
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving link {url}: {e}")
+
+    db.close()
+    logger.info(f"[source_id={source_id}] {new_links} new links saved")
 
 
-            link = Link(url=url, source_id=source_id)
-
-            try:
-                db.add(link)
-                db.commit()
-                new_links += 1
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Error saving link {url}: {e}")
-            finally:
-                db.close()
-
-    print(f"{new_links} new links saved")
-    logger.info(f"{new_links} new links saved")
+def run_all_sources(limit_per_source: int = 15):
+    for source in SOURCES:
+        logger.info(f"Crawling source: {source['name']}")
+        try:
+            links = get_news_links(source, limit=limit_per_source)
+            if links:
+                save_links_to_db(links, source_id=source["id"])
+            else:
+                logger.warning(f"No links found for {source['name']}")
+        except Exception as e:
+            logger.error(f"Failed to crawl {source['name']}: {e}")
