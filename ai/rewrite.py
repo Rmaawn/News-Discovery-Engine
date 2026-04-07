@@ -11,7 +11,7 @@ logger = Logger(module="ai_phase_3")
 # --- Configs ---
 API_KEY = 'sk-uPTN8OTEZEa5zOABATW3ARmZdPFJnGBjnxS8F0CexPkGH2AG'
 BASE_URL = 'https://api.gapgpt.app/v1'
-MODEL_NAME = "gapgpt-qwen-3.5"
+MODEL_NAME = "gpt-4o-mini"
 # -----------------
 
 client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
