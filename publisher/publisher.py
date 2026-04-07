@@ -5,158 +5,153 @@ from database.db import SessionLocal
 from database.models import Article, AIProcessing, PublishLog, Link
 from utils.logger import Logger
 from publisher.bale import send_article_to_bale
+from publisher.rubika import send_article_to_rubika
 
-logger = Logger(module="publisher_phase_4")
+logger = Logger(module="publisher")
+
+# دیکشنری پلتفرم‌ها: برای اضافه کردن پلتفرم جدید فقط اینجا اضافه کن
+PLATFORMS = {
+    "bale": send_article_to_bale,
+    "rubika": send_article_to_rubika,
+}
 
 
 def get_unpublished_ai_articles(
-    limit: int = 10, platform: str = "bale"
-) -> List[Tuple[Article, AIProcessing, Optional[Link]]]:
+    limit: int,
+    platform: str
+) -> List[Tuple[Article, AIProcessing, Link]]:
     """
-    برگرداندن لیست خبرهایی که:
-      - نسخه بازنویسی شده (AIProcessing) دارند
-      - هنوز برای platform مورد نظر با status='success' منتشر نشده‌اند
-
-    خروجی: لیستی از تاپل (Article, AIProcessing, Link)
+    دریافت مقالات بازنویسی شده که هنوز در پلتفرم مشخص منتشر نشده‌اند
+    
+    Args:
+        limit: تعداد مقالات
+        platform: نام پلتفرم (bale, rubika, ...)
+    
+    Returns:
+        لیست تاپل‌های (Article, AIProcessing, Link)
     """
     session = SessionLocal()
-
     try:
-        # زیرکوئری برای آیدی مقاله‌هایی که قبلاً با موفقیت روی این پلتفرم منتشر شده‌اند
-        from sqlalchemy import exists, and_
-
-        subquery_published = (
+        # پیدا کردن مقالاتی که قبلاً در این پلتفرم منتشر شده‌اند
+        subquery = (
             session.query(PublishLog.article_id)
             .filter(
                 PublishLog.platform == platform,
-                PublishLog.status == "success",
+                PublishLog.status == "success"
             )
             .subquery()
         )
-
-        # گرفتن Article + AIProcessing + Link
-        query = (
+        
+        # دریافت مقالات بازنویسی شده که منتشر نشده‌اند
+        results = (
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
             .join(Link, Link.id == Article.link_id)
-            .filter(~Article.id.in_(subquery_published))  # NOT IN
+            .filter(~Article.id.in_(subquery))
             .order_by(Article.id.asc())
             .limit(limit)
+            .all()
         )
-
-        results = query.all()
+        
         return results
-
+        
     except Exception as e:
-        logger.error(f"Error fetching unpublished AI articles: {str(e)}")
+        logger.error(f"Error fetching unpublished articles for {platform}: {str(e)}")
         return []
+    finally:
+        session.close()
 
+
+def publish(platform: str = "bale", limit: int = 10):
+    """
+    انتشار مقالات در پلتفرم مشخص
+    
+    Args:
+        platform: نام پلتفرم (bale, rubika, ...)
+        limit: تعداد مقالات برای انتشار
+    """
+    # بررسی پلتفرم معتبر
+    if platform not in PLATFORMS:
+        logger.error(f"Unknown platform: {platform}. Available: {list(PLATFORMS.keys())}")
+        return
+    
+    send_func = PLATFORMS[platform]
+    session = SessionLocal()
+    
+    try:
+        # دریافت مقالات منتشر نشده
+        items = get_unpublished_ai_articles(limit=limit, platform=platform)
+        
+        if not items:
+            logger.info(f"No articles to publish on {platform}.")
+            return
+        
+        logger.info(f"{len(items)} articles found for {platform} publishing.")
+        
+        # ارسال هر مقاله
+        for article, ai_proc, link in items:
+            title = ai_proc.rewritten_title or article.title or ""
+            content = ai_proc.rewritten_content or ""
+            
+            # بررسی محتوای خالی
+            if not content.strip():
+                logger.warning(f"Article {article.id} has empty content, skipping.")
+                session.add(
+                    PublishLog(
+                        article_id=article.id,
+                        platform=platform,
+                        status="failed",
+                        error_message="Empty content"
+                    )
+                )
+                session.commit()
+                continue
+            
+            # تلاش برای ارسال
+            try:
+                send_func(
+                    title=title,
+                    content=content,
+                    image_url=article.image_url,
+                    source_url=link.url if link else None
+                )
+                
+                # ثبت موفقیت
+                session.add(
+                    PublishLog(
+                        article_id=article.id,
+                        platform=platform,
+                        status="success"
+                    )
+                )
+                session.commit()
+                logger.success(f"Article {article.id} published on {platform}.")
+                
+            except Exception as e:
+                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
+                session.rollback()
+                
+                # ثبت خطا
+                try:
+                    session.add(
+                        PublishLog(
+                            article_id=article.id,
+                            platform=platform,
+                            status="failed",
+                            error_message=str(e)
+                        )
+                    )
+                    session.commit()
+                except Exception as log_error:
+                    logger.error(f"Failed to log error: {log_error}")
+                    session.rollback()
+    
     finally:
         session.close()
 
 
 def publish_to_bale(limit: int = 10):
     """
-    پردازش خبرهای بازنویسی شده و انتشار آن‌ها در کانال بله.
-    برای هر خبر یک رکورد در PublishLog ثبت می‌کند.
+    تابع سازگار با نسخه قبلی برای انتشار در بله
     """
-    session = SessionLocal()
-
-    try:
-        items = get_unpublished_ai_articles(limit=limit, platform="bale")
-
-        if not items:
-            logger.info("No AI-processed articles to publish on Bale.")
-            return
-
-        logger.info(f"{len(items)} articles found for Bale publishing.")
-
-        for article, ai_proc, link in items:
-            logger.info(
-                f"Publishing Article ID {article.id} (AIProcessing ID {ai_proc.id})"
-            )
-
-            # متن نهایی برای انتشار
-            title = ai_proc.rewritten_title or article.title or ""
-            content = ai_proc.rewritten_content or ""
-            source_url = link.url if link else None
-
-            if not content.strip():
-                logger.warning(
-                    f"Article {article.id} has empty rewritten_content. Skipping."
-                )
-                # ثبت لاگ انتشار با وضعیت failed به دلیل محتوای خالی
-                publish_log = PublishLog(
-                    article_id=article.id,
-                    platform="bale",
-                    status="failed",
-                    error_message="Empty rewritten_content",
-                )
-                session.add(publish_log)
-                session.commit()
-                continue
-
-            try:
-                # ارسال به بله
-                result = send_article_to_bale(
-                    title=title,
-                    content=content, 
-                    image_url=article.image_url,
-                    source_url=source_url
-                )
-
-                # سعی می‌کنیم اطلاعاتی مثل message_id را ذخیره کنیم
-                message = result.get("result")
-                published_url = None
-
-                if isinstance(message, dict):
-                    # خیلی از Bot API ها message_id را دارند
-                    msg_id = message.get("message_id")
-                    chat = message.get("chat", {})
-                    chat_id = chat.get("id")
-                    # اگر ساختار URL منتشر شده برای بله را می‌دانستی، اینجا می‌بستی.
-                    # برای الان، message_id و chat_id را در published_url ذخیره می‌کنیم.
-                    if msg_id and chat_id:
-                        published_url = f"chat_id={chat_id}, message_id={msg_id}"
-
-                publish_log = PublishLog(
-                    article_id=article.id,
-                    platform="bale",
-                    status="success",
-                    published_url=published_url,
-                )
-                session.add(publish_log)
-                session.commit()
-
-                logger.success(
-                    f"Article {article.id} published on Bale successfully."
-                )
-
-            except Exception as e:
-                # در صورت خطا در ارسال یا پاسخ API
-                logger.error(
-                    f"Failed to publish Article {article.id} on Bale: {str(e)}"
-                )
-                session.rollback()
-
-                # ثبت در PublishLog
-                try:
-                    publish_log = PublishLog(
-                        article_id=article.id,
-                        platform="bale",
-                        status="failed",
-                        error_message=str(e),
-                    )
-                    session.add(publish_log)
-                    session.commit()
-                except Exception as e_log:
-                    logger.error(
-                        f"Failed to save PublishLog for Article {article.id}: {str(e_log)}"
-                    )
-                    session.rollback()
-
-    except Exception as e:
-        logger.error(f"Unexpected error in Bale publishing pipeline: {str(e)}")
-
-    finally:
-        session.close()
+    publish(platform="bale", limit=limit)
