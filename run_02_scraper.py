@@ -1,7 +1,7 @@
+from dotenv import load_dotenv
+load_dotenv(".env")
 from scraper.fetcher import process_new_links
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 # Configs
 FETCH_LIMIT = 12

@@ -1,6 +1,6 @@
 # run_04_publisher.py
 from dotenv import load_dotenv
-load_dotenv("News.env") 
+load_dotenv(".env") 
 from publisher.publisher import publish
 from utils.logger import Logger
 

@@ -1,8 +1,8 @@
 # run_01_crawler.py
+from dotenv import load_dotenv
+load_dotenv(".env") 
 from discovery.crawler import run_all_sources
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 LIMIT_PER_SOURCE = 15
 logger = Logger(module="crawler_phase_1")

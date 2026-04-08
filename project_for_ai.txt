@@ -858,10 +858,10 @@ FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\wordpress.py
 FILE: C:\Users\arman\Desktop\News Discovery Engine\run_01_crawler.py
 ==============================
 # run_01_crawler.py
+from dotenv import load_dotenv
+load_dotenv(".env") 
 from discovery.crawler import run_all_sources
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 LIMIT_PER_SOURCE = 15
 logger = Logger(module="crawler_phase_1")
@@ -876,10 +876,10 @@ if __name__ == "__main__":
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\run_02_scraper.py
 ==============================
+from dotenv import load_dotenv
+load_dotenv(".env")
 from scraper.fetcher import process_new_links
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 # Configs
 FETCH_LIMIT = 12
@@ -896,10 +896,10 @@ if __name__ == "__main__":
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\run_03_ai.py
 ==============================
+from dotenv import load_dotenv
+load_dotenv(".env") 
 from ai.rewrite import process_articles_with_ai
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 # Configs
 AI_PROCESS_LIMIT = 12  # در هر بار اجرا چند خبر به هوش مصنوعی ارسال شود؟
@@ -917,10 +917,10 @@ if __name__ == "__main__":
 FILE: C:\Users\arman\Desktop\News Discovery Engine\run_04_publisher.py
 ==============================
 # run_04_publisher.py
+from dotenv import load_dotenv
+load_dotenv(".env") 
 from publisher.publisher import publish
 from utils.logger import Logger
-from dotenv import load_dotenv
-load_dotenv("News.env") 
 
 # تنظیمات
 PUBLISH_LIMIT = 12

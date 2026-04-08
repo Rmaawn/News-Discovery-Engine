@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv("News.env") 
+load_dotenv(".env") 
 from ai.rewrite import process_articles_with_ai
 from utils.logger import Logger
 
