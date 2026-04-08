@@ -5,11 +5,17 @@ from typing import Optional, Dict, Any
 from utils.logger import Logger
 from utils.retry import retry_on_error
 
+import os
+
 logger = Logger(module="rubika_publisher")
 
-# تنظیمات روبیکا - باید از BotFather روبیکا بگیری
-RUBIKA_TOKEN = "BAEBHH0RANRYJJKVLOGISPUTLOJBPTMGMDFWVARWOZPQYCHSJQIBGETDUPNHRWFM"
-RUBIKA_CHAT_ID = "@tadnaTest"  # شناسه کانال یا گروه
+
+RUBIKA_TOKEN = os.getenv("RUBIKA_TOKEN")
+RUBIKA_CHAT_ID = os.getenv("RUBIKA_CHAT_ID", "@tadnaTest")
+
+if not RUBIKA_TOKEN:
+    raise RuntimeError("Missing env: RUBIKA_TOKEN")
+
 RUBIKA_BASE_URL = "https://botapi.rubika.ir/v3/"
 
 # تنظیمات متن

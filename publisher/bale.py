@@ -7,12 +7,20 @@ from utils.retry import retry_on_error
 
 logger = Logger(module="bale_client_phase_4")
 
+
+import os
+
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
+BALE_CHANNEL_ID = os.getenv("BALE_CHANNEL_ID", "@tadnatest")
+
+if not BALE_BOT_TOKEN:
+    raise RuntimeError("Missing env: BALE_BOT_TOKEN")
+
+
 # === تنظیمات بله ===
-BALE_BOT_TOKEN = "862673997:tcQaftNRkYDws4cIhsX6x4O_0sYSGHubHko"
-BALE_CHANNEL_ID = "@tadnatest"
 BALE_BASE_URL = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}"
 SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
-SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"  # 👈 اضافه شد
+SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"
 # ============================================
 
 TITLE_PREFIX = "🆎🆎"

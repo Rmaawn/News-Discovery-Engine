@@ -6,13 +6,17 @@ from database.models import Article, AIProcessing
 from utils.logger import Logger
 from utils.retry import retry_on_error
 
+import os
+
+API_KEY = os.getenv("GAPGPT_API_KEY")
+BASE_URL = os.getenv("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
+MODEL_NAME = os.getenv("GAPGPT_MODEL", "gpt-4o-mini")
+
+if not API_KEY:
+    raise RuntimeError("Missing env: GAPGPT_API_KEY")
+
 logger = Logger(module="ai_phase_3")
 
-# --- Configs ---
-API_KEY = 'sk-uPTN8OTEZEa5zOABATW3ARmZdPFJnGBjnxS8F0CexPkGH2AG'
-BASE_URL = 'https://api.gapgpt.app/v1'
-MODEL_NAME = "gpt-4o-mini"
-# -----------------
 
 client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
