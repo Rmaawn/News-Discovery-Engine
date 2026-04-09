@@ -8,14 +8,21 @@ from database.models import Link, Source
 from utils.logger import Logger
 from utils.retry import retry_on_error
 from discovery.sources import SOURCES
+from utils.source_health import is_blocked, mark_fail, mark_success
+from utils.http_client import build_session, random_headers
 
 logger = Logger(module="crawler_phase_1")
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
+SESSION = build_session()
 
 @retry_on_error(max_retries=6, logger=logger)
 def get_news_links(source: dict, limit: int = 100) -> list:
-    response = requests.get(source["url"], headers=HEADERS, timeout=15)
+    response = SESSION.get(
+        source["url"],
+        headers=random_headers({
+            "Referer": source.get("base_url", source["url"])
+        }),
+        timeout=(10, 20),  # (connect, read)
+    )
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -67,15 +74,25 @@ def save_links_to_db(links: list, source_id: int):
 
 def run_all_sources(limit_per_source: int = 15):
     for source in SOURCES:
-        if not source.get("enabled", True):
-            logger.info(f"Source disabled, skipping: {source['name']}")
+        name = source["name"]
+
+        if is_blocked(name):
+            logger.warning(f"Source temporarily blocked (circuit breaker): {name}")
             continue
-        logger.info(f"Crawling source: {source['name']}")
+
+        if not source.get("enabled", True):
+            logger.info(f"Source disabled, skipping: {name}")
+            continue
+
+        logger.info(f"Crawling source: {name}")
         try:
             links = get_news_links(source, limit=limit_per_source)
             if links:
                 save_links_to_db(links, source_id=source["id"])
+                mark_success(name)
             else:
-                logger.warning(f"No links found for {source['name']}")
+                logger.warning(f"No links found for {name}")
+                mark_fail(name)
         except Exception as e:
-            logger.error(f"Failed to crawl {source['name']}: {e}")
+            logger.error(f"Failed to crawl {name}: {e}")
+            mark_fail(name)

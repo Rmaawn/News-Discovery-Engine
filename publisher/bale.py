@@ -23,8 +23,8 @@ SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
 SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"
 # ============================================
 
-TITLE_PREFIX = "🆎🆎"
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
+TITLE_PREFIX = ""
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
 
 
 def build_bale_caption(title: str, content: str, source_url: Optional[str] = None) -> str:

@@ -1,0 +1,1299 @@
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\ai\rewrite.py
+==============================
+import json
+from openai import OpenAI
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+import os
+
+API_KEY = os.getenv("GAPGPT_API_KEY")
+BASE_URL = os.getenv("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
+MODEL_NAME = os.getenv("GAPGPT_MODEL", "gpt-4o-mini")
+
+if not API_KEY:
+    raise RuntimeError("Missing env: GAPGPT_API_KEY")
+
+logger = Logger(module="ai_phase_3")
+
+
+client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def call_ai_for_rewrite(title: str, content: str) -> str:
+    """
+    ارسال درخواست به هوش مصنوعی و دریافت خروجی JSON (به صورت string).
+
+    به کمک دکوریتور retry_on_error:
+    - روی خطاهای شبکه‌ای (timeout، connection، 5xx و ...) تا 5 بار با فاصله
+      افزایشی تلاش می‌کند.
+    - در صورت خطای غیرشبکه‌ای (مثلاً باگ داخلی) فقط لاگ می‌زند و همان دفعه اول raise می‌شود.
+    """
+    system_prompt = """
+    شما یک خبرنگار و ویراستار حرفه‌ای هستید.
+    وظیفه شما بازنویسی عنوان و متن خبر است تا جذاب‌تر، روان‌تر و کاملاً غیرتکراری (یونیک) شود.
+
+    قوانین را دقیقاً رعایت کنید:
+    - فقط روی بازنویسی تمرکز کنید و از خودتان خبر جدید نسازید.
+    - لحن را خبری و حرفه‌ای نگه دارید.
+    - طول متن نهایی خبر باید بین 100 تا 750 کاراکتر باشد (نه کمتر و نه بیشتر).
+    - در صورت امکان متن خبر را در چند خط کوتاه بنویسید.
+    - ابتدای هر خط از متن خبر از ایموجی 🔹 استفاده کنید.
+    - متن را واضح، فشرده و خوانا بنویسید و از حاشیه‌پردازی خودداری کنید.
+    - پس از پایان متن خبر، یک خط خالی ایجاد کنید و در خط بعدی 1 یا 2 هشتگ مرتبط و کلی با موضوع خبر اضافه کنید (مانند: #اقتصاد #فناوری).
+
+    هیچ توضیح اضافه‌ای ندهید. خروجی باید فقط و فقط یک آبجکت JSON معتبر با ساختار زیر باشد:
+
+    {
+        "title": "عنوان جدید و جذاب خبر",
+        "content": "متن بازنویسی شده خبر که ابتدای هر خط آن با 🔹 شروع می‌شود و در انتهای آن پس از یک خط فاصله، 1 یا 2 هشتگ مرتبط قرار می‌گیرد"
+    }
+    """.strip()
+
+
+
+
+    user_prompt = f"عنوان خبر اصلی:\n{title}\n\nمتن خبر اصلی:\n{content}"
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7,
+        # این خط مدل را مجبور به خروجی JSON معتبر می‌کند
+        response_format={"type": "json_object"}
+    )
+
+    # در این مرحله اگر خطای شبکه‌ای بود، exception بالا می‌رود و
+    # توسط retry_on_error مدیریت می‌شود.
+    return response.choices[0].message.content
+
+
+def process_articles_with_ai(limit: int = 5):
+    """
+    پردازش اخباری که هنوز رکوردی در AIProcessing ندارند
+    و ذخیره نسخه بازنویسی‌شده در جدول ai_processing.
+    """
+    session = SessionLocal()
+
+    try:
+        # تمام Articleهایی که هنوز برایشان پردازش AI ثبت نشده
+        unprocessed_articles = (
+            session.query(Article)
+            .outerjoin(AIProcessing, AIProcessing.article_id == Article.id)
+            .filter(AIProcessing.id == None)  # noqa: E711
+            .limit(limit)
+            .all()
+        )
+
+        if not unprocessed_articles:
+            logger.info("No new articles to process for AI.")
+            return
+
+        for article in unprocessed_articles:
+            logger.info(f"AI Processing started for Article ID: {article.id}")
+
+            # متن اصلی را از title و clean_text می‌گیریم
+            original_title = article.title or ""
+            original_content = article.clean_text or ""
+
+            # اگر متن خالی باشد، عملاً چیزی برای بازنویسی نداریم
+            if not original_content.strip():
+                logger.warning(
+                    f"Article {article.id} has empty clean_text. Skipping."
+                )
+                continue
+
+            try:
+                # ممکن است چند بار به خاطر retry دوباره اجرا شود
+                ai_result_str = call_ai_for_rewrite(
+                    original_title, original_content
+                )
+
+            except Exception as e:
+                # بعد از اتمام تمام retryها (یا خطای غیرشبکه‌ای) به اینجا می‌رسیم
+                logger.error(
+                    f"AI request failed for Article {article.id}: {str(e)}"
+                )
+                continue
+
+            if not ai_result_str:
+                logger.warning(
+                    f"Empty response from AI for Article {article.id}. Skipping."
+                )
+                continue
+
+            # حالا خروجی تضمین شده JSON است، ولی باز هم برای اطمینان parse می‌کنیم
+            try:
+                parsed_data = json.loads(ai_result_str)
+
+                new_title = parsed_data.get("title")
+                new_content = parsed_data.get("content")
+
+                if not new_title or not new_content:
+                    raise ValueError(
+                        "Missing 'title' or 'content' in JSON output"
+                    )
+
+                ai_record = AIProcessing(
+                    article_id=article.id,
+                    rewritten_title=new_title,
+                    rewritten_content=new_content,
+                )
+
+                session.add(ai_record)
+                session.commit()
+
+                logger.success(
+                    f"Article {article.id} successfully rewritten and saved."
+                )
+
+            except (json.JSONDecodeError, ValueError) as parse_error:
+                logger.error(
+                    f"Failed to parse AI output for Article {article.id}. "
+                    f"Error: {parse_error}. Raw Output: {ai_result_str}"
+                )
+                session.rollback()
+
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error while saving AI result for Article "
+                    f"{article.id}: {str(e)}"
+                )
+                session.rollback()
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in AI Processing: {str(e)}")
+
+    finally:
+        session.close()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\database\db.py
+==============================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+import os
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///news.db")
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+Base = declarative_base()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\database\models.py
+==============================
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from sqlalchemy import UniqueConstraint, Index
+
+from .db import Base
+
+
+class Source(Base):
+    __tablename__ = "sources"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    base_url = Column(String)
+    language = Column(String)
+    country = Column(String)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=func.now())
+
+
+class Link(Base):
+    __tablename__ = "links"
+
+    id = Column(Integer, primary_key=True)
+
+    source_id = Column(Integer, ForeignKey("sources.id"))
+    url = Column(String, unique=True)
+
+    status = Column(String, default="new")
+
+    discovered_at = Column(DateTime, default=func.now())
+    last_checked_at = Column(DateTime)
+
+    retry_count = Column(Integer, default=0)
+
+    error_message = Column(Text)
+
+    source = relationship("Source")
+
+
+class Article(Base):
+    __tablename__ = "articles"
+
+    id = Column(Integer, primary_key=True)
+
+    link_id = Column(Integer, ForeignKey("links.id"))
+    source_id = Column(Integer, ForeignKey("sources.id"))
+
+    title = Column(String)
+    author = Column(String)
+
+    publish_date = Column(DateTime)
+
+    raw_html = Column(Text)
+    clean_text = Column(Text)
+
+    image_url = Column(String)
+
+    content_hash = Column(String)
+    word_count = Column(Integer)
+
+    created_at = Column(DateTime, default=func.now())
+
+    link = relationship("Link")
+    source = relationship("Source")
+
+
+class AIProcessing(Base):
+    __tablename__ = "ai_processing"
+
+    id = Column(Integer, primary_key=True)
+
+    # خبر اصلی که این بازنویسی مربوط به آن است
+    article_id = Column(Integer, ForeignKey("articles.id"))
+
+    # خروجی فاز سوم: عنوان بازنویسی‌شده و متن بازنویسی‌شده
+    rewritten_title = Column(Text)
+    rewritten_content = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+    # (اختیاری ولی مفید برای آینده: رابطه با Article)
+    # اگر نخواستی، می‌تونی این خط رو حذف کنی
+    article = relationship("Article")
+
+
+class PublishLog(Base):
+    __tablename__ = "publish_log"
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"))
+    platform = Column(String)
+    status = Column(String, default="pending")
+    published_url = Column(String)
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("article_id", "platform", name="uq_publish_article_platform"),
+        Index("ix_publish_platform_status_article", "platform", "status", "article_id"),
+    )
+
+
+
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True)
+
+    module = Column(String)
+
+    level = Column(String)
+
+    message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\discovery\crawler.py
+==============================
+# discovery/crawler.py
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+from database.db import SessionLocal
+from database.models import Link, Source
+from utils.logger import Logger
+from utils.retry import retry_on_error
+from discovery.sources import SOURCES
+
+logger = Logger(module="crawler_phase_1")
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+@retry_on_error(max_retries=6, logger=logger)
+def get_news_links(source: dict, limit: int = 100) -> list:
+    response = requests.get(source["url"], headers=HEADERS, timeout=15)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    base_url = source.get("base_url", source["url"])
+
+    search_root = soup
+    if source.get("section_selector") and source.get("section_filter"):
+        for sec in soup.select(source["section_selector"]):
+            if source["section_filter"](sec):
+                search_root = sec
+                break
+
+    links_set = set()
+    links = []
+
+    for a in search_root.select(source["link_selector"]):
+        href = a.get("href", "").strip()
+        if not href or not source["link_filter"](href):
+            continue
+        full_url = urljoin(base_url, href)
+        if full_url not in links_set:
+            links_set.add(full_url)
+            links.append(full_url)
+        if len(links) >= limit:
+            break
+
+    return links
+
+
+
+def save_links_to_db(links: list, source_id: int):
+    db = SessionLocal()
+    new_links = 0
+
+    for url in links:
+        if db.query(Link).filter(Link.url == url).first():
+            continue
+        try:
+            db.add(Link(url=url, source_id=source_id))
+            db.commit()
+            new_links += 1
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving link {url}: {e}")
+
+    db.close()
+    logger.info(f"[source_id={source_id}] {new_links} new links saved")
+
+
+def run_all_sources(limit_per_source: int = 15):
+    for source in SOURCES:
+        if not source.get("enabled", True):
+            logger.info(f"Source disabled, skipping: {source['name']}")
+            continue
+        logger.info(f"Crawling source: {source['name']}")
+        try:
+            links = get_news_links(source, limit=limit_per_source)
+            if links:
+                save_links_to_db(links, source_id=source["id"])
+            else:
+                logger.warning(f"No links found for {source['name']}")
+        except Exception as e:
+            logger.error(f"Failed to crawl {source['name']}: {e}")
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\discovery\sources.py
+==============================
+# discovery/sources.py
+import os
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    v = os.getenv(name, str(default)).strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+SOURCES = [
+    {
+        "id": 1,
+        "name": "tasnim",
+        "url": "https://www.tasnimnews.ir/fa/news/overview/popular",
+        "enabled": _env_bool("SOURCE_TASNIM_ENABLED", True),
+        "link_filter": lambda href: "/fa/news/" in href and "/fa/news/overview/" not in href and "/fa/media/" not in href,
+        "link_selector": "section.news-container.news-box section.content article.box-item a[href]",
+        "section_filter": lambda sec: (
+            (el := sec.select_one("header span.title")) is not None and
+            el.get_text(strip=True) == "پربیننده ها"
+        ),
+        "section_selector": "section.news-container.news-box",
+    },
+    {
+        "id": 2,
+        "name": "isna",
+        "url": "https://www.isna.ir/",
+        "enabled": _env_bool("SOURCE_ISNA_ENABLED", False),   # پیش‌فرض خاموش
+        "link_filter": lambda href: "/news/" in href and href.startswith("/"),
+        "link_selector": "a[href]",
+        "section_filter": None,
+        "section_selector": None,
+        "base_url": "https://www.isna.ir",
+    },
+    {
+        "id": 3,
+        "name": "farsnews",
+        "url": "https://www.farsnews.ir/",
+        "enabled": _env_bool("SOURCE_FARS_ENABLED", False),   # پیش‌فرض خاموش
+        "link_filter": lambda href: "/news/" in href,
+        "link_selector": "a[href]",
+        "section_filter": None,
+        "section_selector": None,
+        "base_url": "https://www.farsnews.ir",
+    },
+]
+
+SOURCES_BY_ID = {s["id"]: s for s in SOURCES}
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\init_db.py
+==============================
+from database.db import engine
+from database.models import Base
+
+Base.metadata.create_all(bind=engine)
+
+print("Database initialized")
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\main.py
+==============================
+# main.py
+import time
+from datetime import datetime
+from dotenv import load_dotenv
+
+# بارگذاری env یکبار در شروع
+load_dotenv(".env")
+
+from utils.logger import Logger
+from run_01_crawler import run as run_crawler
+from run_02_scraper import run as run_scraper
+from run_03_ai import run as run_ai
+from run_04_publisher import run as run_publisher
+
+logger = Logger(module="main_scheduler")
+
+# تنظیمات زمان‌بندی
+CYCLE_SECONDS = 60 * 60   # یک ساعت
+GAP_SECONDS = 12    # فاصله بین هر فاز (اینجا 12 دقیقه)
+TARGET_PUBLISHED = 8
+RETRY_SLEEP_SECONDS = 90   # اگر صفر بود، کمی صبر کند
+MAX_TRIES_PER_CYCLE = 10   # جلوگیری از گیر افتادن بی‌نهایت
+
+def run_phase(name, func):
+    logger.info(f"Starting phase: {name}")
+    start = time.time()
+    try:
+        func()
+        elapsed = time.time() - start
+        logger.success(f"Phase '{name}' finished in {elapsed:.1f}s")
+    except Exception as e:
+        elapsed = time.time() - start
+        logger.error(f"Phase '{name}' failed after {elapsed:.1f}s: {e}")
+
+
+def main():
+    logger.info("Main scheduler started.")
+
+    while True:
+        cycle_start = time.time()
+        cycle_start_human = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info(f"New cycle started at {cycle_start_human}")
+
+        published_total = 0
+        tries = 0
+
+        while published_total < TARGET_PUBLISHED and tries < MAX_TRIES_PER_CYCLE:
+            tries += 1
+            logger.info(f"Attempt {tries}: target={TARGET_PUBLISHED}, current={published_total}")
+
+            run_phase("crawler", run_crawler)
+            time.sleep(GAP_SECONDS)
+
+            run_phase("scraper", run_scraper)
+            time.sleep(GAP_SECONDS)
+
+            run_phase("ai_rewrite", run_ai)
+            time.sleep(GAP_SECONDS)
+
+            # فاز انتشار و گرفتن تعداد موفق
+            try:
+                published_now = run_publisher()
+            except Exception as e:
+                logger.error(f"Publisher failed: {e}")
+                published_now = 0
+
+            published_total += published_now
+
+            if published_now == 0:
+                logger.warning("No new published items. Waiting before retry...")
+                time.sleep(RETRY_SLEEP_SECONDS)
+
+        if published_total < TARGET_PUBLISHED:
+            logger.warning(
+                f"Could not reach target ({TARGET_PUBLISHED}). Published={published_total}. "
+                f"Starting next cycle anyway."
+            )
+
+        elapsed_cycle = time.time() - cycle_start
+        remaining = CYCLE_SECONDS - elapsed_cycle
+        if remaining > 0:
+            logger.info(f"Cycle done. Sleeping {remaining:.1f}s until next cycle.")
+            time.sleep(remaining)
+        else:
+            logger.warning(
+                f"Cycle took longer than 1 hour by {abs(remaining):.1f}s. Starting next cycle immediately."
+            )
+
+
+if __name__ == "__main__":
+    main()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\bale.py
+==============================
+# publisher/bale.py
+import requests
+from typing import Optional, Dict, Any
+
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+logger = Logger(module="bale_client_phase_4")
+
+
+import os
+
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
+BALE_CHANNEL_ID = os.getenv("BALE_CHANNEL_ID", "@tadnatest")
+
+if not BALE_BOT_TOKEN:
+    raise RuntimeError("Missing env: BALE_BOT_TOKEN")
+
+
+# === تنظیمات بله ===
+BALE_BASE_URL = f"https://tapi.bale.ai/bot{BALE_BOT_TOKEN}"
+SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
+SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"
+# ============================================
+
+TITLE_PREFIX = "🆎🆎"
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
+
+
+def build_bale_caption(title: str, content: str, source_url: Optional[str] = None) -> str:
+    """ساخت caption برای ارسال با تصویر"""
+    parts = []
+
+    parts.append(TITLE_PREFIX)
+
+    if title:
+        parts.append(f"🔴 *{title}*\n")
+
+    if content:
+        parts.append(content.strip())
+
+    parts.append("\n\n" + FOOTER_TEXT)
+
+    return "\n".join(parts).strip()
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def send_message(
+    chat_id: str,
+    text: str,
+    parse_mode: str = "HTML",
+    disable_web_page_preview: bool = False,
+) -> Dict[str, Any]:
+    """ارسال پیام متنی بدون تصویر"""
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": disable_web_page_preview,
+    }
+
+    response = requests.post(SEND_MESSAGE_ENDPOINT, json=payload, timeout=30)
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not data.get("ok", False):
+        raise RuntimeError(f"Bale API error: {data}")
+
+    return data
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def send_photo(
+    chat_id: str,
+    photo: str,
+    caption: Optional[str] = None,
+    parse_mode: str = "HTML",
+) -> Dict[str, Any]:
+    """ارسال تصویر با caption"""
+    payload = {
+        "chat_id": chat_id,
+        "photo": photo,
+    }
+    
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = parse_mode
+
+    response = requests.post(SEND_PHOTO_ENDPOINT, json=payload, timeout=30)
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not data.get("ok", False):
+        raise RuntimeError(f"Bale API error: {data}")
+
+    return data
+
+
+def send_article_to_bale(
+    title: str,
+    content: str,
+    image_url: Optional[str] = None,
+    source_url: Optional[str] = None,
+    chat_id: str = BALE_CHANNEL_ID,
+) -> Dict[str, Any]:
+    """ارسال خبر به بله (با یا بدون تصویر)"""
+    
+    caption = build_bale_caption(title, content, source_url=source_url)
+    
+    if image_url:
+        logger.info(f"Sending article with image to Bale channel: {chat_id}")
+        result = send_photo(chat_id=chat_id, photo=image_url, caption=caption)
+    else:
+        logger.info(f"Sending article without image to Bale channel: {chat_id}")
+        result = send_message(chat_id=chat_id, text=caption)
+    
+    logger.success("Article sent to Bale successfully.")
+    return result
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\publisher.py
+==============================
+from typing import List, Tuple
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing, PublishLog, Link
+from utils.logger import Logger
+from publisher.bale import send_article_to_bale
+from publisher.rubika import send_article_to_rubika
+
+logger = Logger(module="publisher")
+
+PLATFORMS = {
+    "bale": send_article_to_bale,
+    "rubika": send_article_to_rubika,
+}
+
+
+def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
+    session = SessionLocal()
+    try:
+        published_select = (
+            select(PublishLog.article_id)
+            .where(
+                PublishLog.platform == platform,
+                PublishLog.status == "success"
+            )
+        )
+
+        results = (
+            session.query(Article, AIProcessing, Link)
+            .join(AIProcessing, AIProcessing.article_id == Article.id)
+            .join(Link, Link.id == Article.link_id)
+            .filter(~Article.id.in_(published_select))
+            .order_by(Article.id.asc())
+            .limit(limit)
+            .all()
+        )
+        return results
+    except Exception as e:
+        logger.error(f"Error fetching unpublished articles for {platform}: {str(e)}")
+        return []
+    finally:
+        session.close()
+
+
+def publish(platform: str = "bale", limit: int = 10) -> int:
+    if platform not in PLATFORMS:
+        logger.error(f"Unknown platform: {platform}. Available: {list(PLATFORMS.keys())}")
+        return 0
+
+    send_func = PLATFORMS[platform]
+    session = SessionLocal()
+
+    success_count = 0
+
+    try:
+        items = get_unpublished_ai_articles(limit=limit, platform=platform)
+        if not items:
+            logger.info(f"No articles to publish on {platform}.")
+            return 0
+
+        logger.info(f"{len(items)} articles found for {platform} publishing.")
+
+        for article, ai_proc, link in items:
+            title = ai_proc.rewritten_title or article.title or ""
+            content = ai_proc.rewritten_content or ""
+
+            if not content.strip():
+                logger.warning(f"Article {article.id} has empty content, skipping.")
+                continue
+
+            exists = session.query(PublishLog.id).filter(
+                PublishLog.article_id == article.id,
+                PublishLog.platform == platform,
+                PublishLog.status == "success"
+            ).first()
+            if exists:
+                logger.info(f"Article {article.id} already published on {platform}, skipping.")
+                continue
+
+            try:
+                send_func(
+                    title=title,
+                    content=content,
+                    image_url=article.image_url,
+                    source_url=link.url if link else None
+                )
+
+                session.add(
+                    PublishLog(
+                        article_id=article.id,
+                        platform=platform,
+                        status="success"
+                    )
+                )
+                session.commit()
+                success_count += 1
+                logger.success(f"Article {article.id} published on {platform}.")
+
+            except IntegrityError:
+                session.rollback()
+                logger.warning(f"Duplicate prevented by DB for article={article.id}, platform={platform}.")
+
+            except Exception as e:
+                session.rollback()
+                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
+                try:
+                    session.add(
+                        PublishLog(
+                            article_id=article.id,
+                            platform=platform,
+                            status="failed",
+                            error_message=str(e)
+                        )
+                    )
+                    session.commit()
+                except Exception as log_error:
+                    session.rollback()
+                    logger.error(f"Failed to log error: {log_error}")
+
+    finally:
+        session.close()
+
+    return success_count
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\rubika.py
+==============================
+# publisher/rubika.py
+import requests
+from typing import Optional, Dict, Any
+
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+import os
+
+logger = Logger(module="rubika_publisher")
+
+
+RUBIKA_TOKEN = os.getenv("RUBIKA_TOKEN")
+RUBIKA_CHAT_ID = os.getenv("RUBIKA_CHAT_ID", "@tadnaTest")
+
+if not RUBIKA_TOKEN:
+    raise RuntimeError("Missing env: RUBIKA_TOKEN")
+
+RUBIKA_BASE_URL = "https://botapi.rubika.ir/v3/"
+
+# تنظیمات متن
+TITLE_PREFIX = "🆎🆎"
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
+
+
+def build_caption(title: str, content: str) -> str:
+    parts = [TITLE_PREFIX]
+    if title:
+        parts.append(f"🔴 {title}\n")
+    if content:
+        parts.append(content.strip())
+    parts.append("\n\n" + FOOTER_TEXT)
+    return "\n".join(parts).strip()
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def send_message_rubika(
+    text: str,
+    chat_id: str = RUBIKA_CHAT_ID,
+    disable_notification: bool = False,
+    reply_to_message_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    ارسال پیام متنی به روبیکا
+    
+    Args:
+        text: متن پیام
+        chat_id: شناسه چت
+        disable_notification: غیرفعال کردن اعلان
+        reply_to_message_id: پاسخ به پیام خاص
+    
+    Returns:
+        پاسخ API روبیکا
+    """
+    url = f"{RUBIKA_BASE_URL}{RUBIKA_TOKEN}/sendMessage"
+    
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_notification": disable_notification,
+    }
+    
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = reply_to_message_id
+    
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    
+    data = response.json()
+    
+    if data.get("status") != "OK":
+        raise RuntimeError(f"Rubika API error: {data}")
+    
+    logger.info(f"Message sent to Rubika successfully")
+    return data
+
+
+def send_article_to_rubika(
+    title: str,
+    content: str,
+    image_url: Optional[str] = None,
+    source_url: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    text = build_caption(title, content)
+
+    if image_url:
+        # دو خط قبل از خبر، لینک تصویر
+        text = f"{image_url}\n\n{text}"
+
+    return send_message_rubika(text)
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\wordpress.py
+==============================
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_01_crawler.py
+==============================
+# run_01_crawler.py
+from dotenv import load_dotenv
+load_dotenv(".env") 
+from discovery.crawler import run_all_sources
+from utils.logger import Logger
+
+LIMIT_PER_SOURCE = 15
+logger = Logger(module="crawler_phase_1")
+
+def run():
+    logger.info(f"Starting multi-source discovery... (Limit per source: {LIMIT_PER_SOURCE})")
+    run_all_sources(limit_per_source=LIMIT_PER_SOURCE)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_02_scraper.py
+==============================
+from dotenv import load_dotenv
+load_dotenv(".env")
+from scraper.fetcher import process_new_links
+from utils.logger import Logger
+
+# Configs
+FETCH_LIMIT = 12
+MAX_RETRIES = 40
+RETRY_COOLDOWN_MINUTES = 30
+
+logger = Logger(module="scraper_phase_2")
+
+def run():
+    logger.info(f"Starting content extraction... (Limit: {FETCH_LIMIT})")
+    process_new_links(
+        limit=FETCH_LIMIT,
+        max_retries=MAX_RETRIES,
+        retry_cooldown_minutes=RETRY_COOLDOWN_MINUTES
+    )
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_03_ai.py
+==============================
+from dotenv import load_dotenv
+load_dotenv(".env") 
+from ai.rewrite import process_articles_with_ai
+from utils.logger import Logger
+
+# Configs
+AI_PROCESS_LIMIT = 12  # در هر بار اجرا چند خبر به هوش مصنوعی ارسال شود؟
+
+logger = Logger(module="ai_phase_3")
+
+def run():
+    logger.info(f"Starting AI rewriting... (Limit: {AI_PROCESS_LIMIT})")
+    process_articles_with_ai(limit=AI_PROCESS_LIMIT)
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\run_04_publisher.py
+==============================
+# run_04_publisher.py
+from dotenv import load_dotenv
+load_dotenv(".env") 
+from publisher.publisher import publish
+from utils.logger import Logger
+
+# تنظیمات
+PUBLISH_LIMIT = 8
+PLATFORMS = ["bale", "rubika"]  # لیست پلتفرم‌های فعال
+
+logger = Logger(module="run_publisher")
+
+
+def run() -> int:
+    logger.info("Starting publisher for all platforms...")
+    total_success = 0
+    
+    for platform in PLATFORMS:
+        logger.info(f"Publishing to {platform}... (Limit: {PUBLISH_LIMIT})")
+        try:
+            count = publish(platform=platform, limit=PUBLISH_LIMIT)
+            total_success += count
+        except Exception as e:
+            logger.error(f"Error publishing to {platform}: {e}")
+    
+    logger.info(f"Publisher finished. Total success: {total_success}")
+    return total_success
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\extractor.py
+==============================
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\fetcher.py
+==============================
+# scraper/fetcher.py
+import requests
+import hashlib
+from datetime import datetime, timedelta
+from sqlalchemy import or_, and_
+from database.db import SessionLocal
+from database.models import Link, Article
+from scraper.parsers import PARSERS
+
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+def fetch_article(link_id, url, source_id):
+    db = SessionLocal()
+    link = None
+    try:
+        link = db.query(Link).filter(Link.id == link_id).first()
+        if not link:
+            print(f"❌ Link not found: {link_id}")
+            return False
+
+        link.status = "fetching"
+        link.last_checked_at = datetime.now()
+        db.commit()
+
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        html = response.text
+
+        parser = PARSERS.get(source_id, PARSERS[1])
+        parsed = parser(html, url)
+
+        title = parsed["title"]
+        image_url = parsed["image_url"]
+        clean_text = parsed["clean_text"]
+
+        content_hash = hashlib.md5(clean_text.encode()).hexdigest()
+        word_count = len(clean_text.split())
+
+        db.add(Article(
+            link_id=link_id,
+            source_id=source_id,
+            title=title,
+            raw_html=html,
+            clean_text=clean_text,
+            image_url=image_url,
+            content_hash=content_hash,
+            word_count=word_count,
+        ))
+
+        link.status = "fetched"
+        db.commit()
+        print(f"✅ {title[:50]}...")
+        return True
+
+    except Exception as e:
+        if link is None:
+            link = db.query(Link).filter(Link.id == link_id).first()
+
+        if link:
+            link.status = "failed"
+            link.error_message = str(e)
+            link.retry_count = (link.retry_count or 0) + 1
+            link.last_checked_at = datetime.now()
+            db.commit()
+
+        print(f"❌ Error: {str(e)[:120]}")
+        return False
+
+    finally:
+        db.close()
+
+
+
+def process_new_links(limit=10, max_retries=3, retry_cooldown_minutes=30):
+    db = SessionLocal()
+    try:
+        retry_before = datetime.now() - timedelta(minutes=retry_cooldown_minutes)
+
+        links = (
+            db.query(Link)
+            .filter(
+                or_(
+                    Link.status == "new",
+                    and_(
+                        Link.status == "failed",
+                        Link.retry_count < max_retries,
+                        or_(
+                            Link.last_checked_at == None,   # noqa: E711
+                            Link.last_checked_at <= retry_before
+                        )
+                    )
+                )
+            )
+            .order_by(Link.discovered_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+    finally:
+        db.close()
+
+    print(f"\n🔄 Processing {len(links)} links...\n")
+    success = 0
+    for link in links:
+        if fetch_article(link.id, link.url, link.source_id):
+            success += 1
+
+    print(f"\n✅ {success}/{len(links)} articles fetched successfully")
+
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\parsers.py
+==============================
+# scraper/parsers.py
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+
+def parse_tasnim(html: str, url: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    title_tag = soup.find("h1", class_="title")
+    title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
+
+    image_url = None
+    img_tag = soup.find("img", class_="img-responsive")
+    if img_tag and img_tag.get("src"):
+        image_url = img_tag["src"]
+        if not image_url.startswith("http"):
+            image_url = urljoin(url, image_url)
+
+    story_div = soup.find("div", class_="story")
+    if story_div:
+        for tag in story_div.find_all(["script", "style", "aside"]):
+            tag.decompose()
+        clean_text = story_div.get_text(separator="\n", strip=True)
+    else:
+        clean_text = ""
+
+    return {"title": title, "image_url": image_url, "clean_text": clean_text}
+
+
+def parse_isna(html: str, url: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    title_tag = soup.find("h1", class_="first-title")
+    title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
+
+    image_url = None
+    img_tag = soup.select_one("div.article-image img")
+    if img_tag and img_tag.get("src"):
+        image_url = urljoin(url, img_tag["src"])
+
+    body = soup.find("div", class_="item-body")
+    if body:
+        for tag in body.find_all(["script", "style", "aside", "figure"]):
+            tag.decompose()
+        clean_text = body.get_text(separator="\n", strip=True)
+    else:
+        clean_text = ""
+
+    return {"title": title, "image_url": image_url, "clean_text": clean_text}
+
+
+def parse_farsnews(html: str, url: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    title_tag = soup.find("h1", class_="title")
+    title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
+
+    image_url = None
+    img_tag = soup.select_one("div.media-news img")
+    if img_tag and img_tag.get("src"):
+        image_url = urljoin(url, img_tag["src"])
+
+    body = soup.find("div", {"id": "newsText"})
+    if body:
+        for tag in body.find_all(["script", "style", "aside"]):
+            tag.decompose()
+        clean_text = body.get_text(separator="\n", strip=True)
+    else:
+        clean_text = ""
+
+    return {"title": title, "image_url": image_url, "clean_text": clean_text}
+
+
+# نگاشت source_id به parser مربوطه
+PARSERS = {
+    1: parse_tasnim,
+    2: parse_isna,
+    3: parse_farsnews,
+}
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\logger.py
+==============================
+from database.db import SessionLocal
+from database.models import SystemLog
+
+class Logger:
+    COLORS = {
+        'INFO': '\033[94m',
+        'SUCCESS': '\033[92m',
+        'WARNING': '\033[93m',
+        'ERROR': '\033[91m',
+        'RESET': '\033[0m'
+    }
+
+    def __init__(self, module="system"):
+        self.module = module
+    
+    def _log(self, level, message):
+        session = SessionLocal()
+        try:
+            log = SystemLog(module=self.module, level=level, message=message)
+            session.add(log)
+            session.commit()
+        except Exception:
+            pass # Prevent DB errors from crashing the app
+        finally:
+            session.close()
+            
+        color = self.COLORS.get(level, self.COLORS['RESET'])
+        print(f"{color}[{level}] [{self.module}] {message}{self.COLORS['RESET']}")
+    
+    def info(self, message):
+        self._log('INFO', message)
+    
+    def success(self, message):
+        self._log('SUCCESS', message)
+    
+    def warning(self, message):
+        self._log('WARNING', message)
+    
+    def error(self, message):
+        self._log('ERROR', message)
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\retry.py
+==============================
+import time
+import requests
+
+def _is_retryable_http_error(exc: requests.exceptions.RequestException) -> bool:
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return True  # timeout/dns/connection
+    code = resp.status_code
+    # فقط 5xx و 429 قابل retry
+    return code >= 500 or code == 429
+
+def retry_on_error(max_retries=8, logger=None):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.RequestException as e:
+                    retryable = _is_retryable_http_error(e)
+                    if (attempt < max_retries - 1) and retryable:
+                        wait = min((attempt + 1) * 10, 60)
+                        if logger:
+                            logger.warning(
+                                f"Retryable network/http error in {func.__name__}: {e}. "
+                                f"Retrying in {wait}s ({attempt+1}/{max_retries})"
+                            )
+                        time.sleep(wait)
+                        continue
+
+                    if logger:
+                        logger.error(f"Non-retryable or max-retries reached in {func.__name__}: {e}")
+                    raise
+                except Exception as e:
+                    if logger:
+                        logger.error(f"Error in {func.__name__}: {e}")
+                    raise
+        return wrapper
+    return decorator
+

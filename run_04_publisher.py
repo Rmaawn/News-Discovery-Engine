@@ -11,18 +11,20 @@ PLATFORMS = ["bale", "rubika"]  # لیست پلتفرم‌های فعال
 logger = Logger(module="run_publisher")
 
 
-def run():
-    """اجرای انتشار برای تمام پلتفرم‌های فعال"""
+def run() -> int:
     logger.info("Starting publisher for all platforms...")
+    total_success = 0
     
     for platform in PLATFORMS:
         logger.info(f"Publishing to {platform}... (Limit: {PUBLISH_LIMIT})")
         try:
-            publish(platform=platform, limit=PUBLISH_LIMIT)
+            count = publish(platform=platform, limit=PUBLISH_LIMIT)
+            total_success += count
         except Exception as e:
             logger.error(f"Error publishing to {platform}: {e}")
     
-    logger.info("Publisher finished for all platforms.")
+    logger.info(f"Publisher finished. Total success: {total_success}")
+    return total_success
 
 
 if __name__ == "__main__":

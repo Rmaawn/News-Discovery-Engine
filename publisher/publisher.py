@@ -44,19 +44,21 @@ def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article
         session.close()
 
 
-def publish(platform: str = "bale", limit: int = 10):
+def publish(platform: str = "bale", limit: int = 10) -> int:
     if platform not in PLATFORMS:
         logger.error(f"Unknown platform: {platform}. Available: {list(PLATFORMS.keys())}")
-        return
+        return 0
 
     send_func = PLATFORMS[platform]
     session = SessionLocal()
+
+    success_count = 0
 
     try:
         items = get_unpublished_ai_articles(limit=limit, platform=platform)
         if not items:
             logger.info(f"No articles to publish on {platform}.")
-            return
+            return 0
 
         logger.info(f"{len(items)} articles found for {platform} publishing.")
 
@@ -68,7 +70,6 @@ def publish(platform: str = "bale", limit: int = 10):
                 logger.warning(f"Article {article.id} has empty content, skipping.")
                 continue
 
-            # دوباره چک لحظه‌ای (double-check)
             exists = session.query(PublishLog.id).filter(
                 PublishLog.article_id == article.id,
                 PublishLog.platform == platform,
@@ -94,6 +95,7 @@ def publish(platform: str = "bale", limit: int = 10):
                     )
                 )
                 session.commit()
+                success_count += 1
                 logger.success(f"Article {article.id} published on {platform}.")
 
             except IntegrityError:
@@ -119,3 +121,5 @@ def publish(platform: str = "bale", limit: int = 10):
 
     finally:
         session.close()
+
+    return success_count
