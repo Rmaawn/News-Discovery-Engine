@@ -16,7 +16,7 @@ logger = Logger(module="main_scheduler")
 
 # تنظیمات زمان‌بندی
 CYCLE_SECONDS = 60 * 60   # یک ساعت
-GAP_SECONDS = 10     # فاصله بین هر فاز (اینجا 12 دقیقه)
+GAP_SECONDS = 12    # فاصله بین هر فاز (اینجا 12 دقیقه)
 
 
 def run_phase(name, func):

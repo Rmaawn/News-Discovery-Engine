@@ -6,20 +6,21 @@ from urllib.parse import urljoin
 from database.db import SessionLocal
 from database.models import Link, Source
 from utils.logger import Logger
+from utils.retry import retry_on_error
 from discovery.sources import SOURCES
 
 logger = Logger(module="crawler_phase_1")
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
+@retry_on_error(max_retries=6, logger=logger)
 def get_news_links(source: dict, limit: int = 100) -> list:
-    response = requests.get(source["url"], headers=HEADERS, timeout=30)
+    response = requests.get(source["url"], headers=HEADERS, timeout=15)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
     base_url = source.get("base_url", source["url"])
 
-    # اگر section_filter داشت، اول section رو پیدا کن
     search_root = soup
     if source.get("section_selector") and source.get("section_filter"):
         for sec in soup.select(source["section_selector"]):
@@ -42,6 +43,7 @@ def get_news_links(source: dict, limit: int = 100) -> list:
             break
 
     return links
+
 
 
 def save_links_to_db(links: list, source_id: int):
