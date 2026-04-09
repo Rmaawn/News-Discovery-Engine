@@ -1,8 +1,8 @@
 # scraper/fetcher.py
 import requests
 import hashlib
-from datetime import datetime
-
+from datetime import datetime, timedelta
+from sqlalchemy import or_, and_
 from database.db import SessionLocal
 from database.models import Link, Article
 from scraper.parsers import PARSERS
@@ -12,8 +12,13 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def fetch_article(link_id, url, source_id):
     db = SessionLocal()
+    link = None
     try:
         link = db.query(Link).filter(Link.id == link_id).first()
+        if not link:
+            print(f"❌ Link not found: {link_id}")
+            return False
+
         link.status = "fetching"
         link.last_checked_at = datetime.now()
         db.commit()
@@ -22,7 +27,6 @@ def fetch_article(link_id, url, source_id):
         response.raise_for_status()
         html = response.text
 
-        # انتخاب parser بر اساس source_id
         parser = PARSERS.get(source_id, PARSERS[1])
         parsed = parser(html, url)
 
@@ -50,22 +54,51 @@ def fetch_article(link_id, url, source_id):
         return True
 
     except Exception as e:
-        link = db.query(Link).filter(Link.id == link_id).first()
-        link.status = "failed"
-        link.error_message = str(e)
-        link.retry_count += 1
-        db.commit()
-        print(f"❌ Error: {str(e)[:50]}")
+        if link is None:
+            link = db.query(Link).filter(Link.id == link_id).first()
+
+        if link:
+            link.status = "failed"
+            link.error_message = str(e)
+            link.retry_count = (link.retry_count or 0) + 1
+            link.last_checked_at = datetime.now()
+            db.commit()
+
+        print(f"❌ Error: {str(e)[:120]}")
         return False
 
     finally:
         db.close()
 
 
-def process_new_links(limit=10):
+
+def process_new_links(limit=10, max_retries=3, retry_cooldown_minutes=30):
     db = SessionLocal()
-    links = db.query(Link).filter(Link.status == "new").limit(limit).all()
-    db.close()
+    try:
+        retry_before = datetime.now() - timedelta(minutes=retry_cooldown_minutes)
+
+        links = (
+            db.query(Link)
+            .filter(
+                or_(
+                    Link.status == "new",
+                    and_(
+                        Link.status == "failed",
+                        Link.retry_count < max_retries,
+                        or_(
+                            Link.last_checked_at == None,   # noqa: E711
+                            Link.last_checked_at <= retry_before
+                        )
+                    )
+                )
+            )
+            .order_by(Link.discovered_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+    finally:
+        db.close()
 
     print(f"\n🔄 Processing {len(links)} links...\n")
     success = 0
@@ -74,3 +107,4 @@ def process_new_links(limit=10):
             success += 1
 
     print(f"\n✅ {success}/{len(links)} articles fetched successfully")
+

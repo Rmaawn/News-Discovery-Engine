@@ -65,6 +65,9 @@ def save_links_to_db(links: list, source_id: int):
 
 def run_all_sources(limit_per_source: int = 15):
     for source in SOURCES:
+        if not source.get("enabled", True):
+            logger.info(f"Source disabled, skipping: {source['name']}")
+            continue
         logger.info(f"Crawling source: {source['name']}")
         try:
             links = get_news_links(source, limit=limit_per_source)

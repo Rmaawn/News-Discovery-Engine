@@ -24,17 +24,12 @@ FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبا
 
 
 def build_caption(title: str, content: str) -> str:
-    """ساخت متن نهایی برای ارسال"""
     parts = [TITLE_PREFIX]
-    
     if title:
         parts.append(f"🔴 {title}\n")
-    
     if content:
         parts.append(content.strip())
-    
     parts.append("\n\n" + FOOTER_TEXT)
-    
     return "\n".join(parts).strip()
 
 
@@ -87,25 +82,10 @@ def send_article_to_rubika(
     source_url: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """
-    ارسال خبر به روبیکا (فقط متن)
-    
-    Args:
-        title: عنوان خبر
-        content: محتوای خبر
-        image_url: URL تصویر (فعلاً استفاده نمی‌شه)
-        source_url: لینک منبع (فعلاً استفاده نمی‌شه)
-    
-    Returns:
-        پاسخ API روبیکا
-    
-    Note:
-        تصویر فعلاً ارسال نمی‌شه چون نیاز به آپلود جداگانه داره
-    """
     text = build_caption(title, content)
-    
-    # اگه تصویر داشت، فعلاً نادیده گرفته می‌شه
+
     if image_url:
-        logger.warning(f"Image URL provided but not sent (not implemented): {image_url}")
-    
+        # دو خط قبل از خبر، لینک تصویر
+        text = f"{image_url}\n\n{text}"
+
     return send_message_rubika(text)

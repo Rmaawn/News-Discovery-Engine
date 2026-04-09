@@ -1,5 +1,6 @@
-# publisher/publisher.py
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from database.db import SessionLocal
 from database.models import Article, AIProcessing, PublishLog, Link
@@ -9,52 +10,33 @@ from publisher.rubika import send_article_to_rubika
 
 logger = Logger(module="publisher")
 
-# دیکشنری پلتفرم‌ها: برای اضافه کردن پلتفرم جدید فقط اینجا اضافه کن
 PLATFORMS = {
     "bale": send_article_to_bale,
     "rubika": send_article_to_rubika,
 }
 
 
-def get_unpublished_ai_articles(
-    limit: int,
-    platform: str
-) -> List[Tuple[Article, AIProcessing, Link]]:
-    """
-    دریافت مقالات بازنویسی شده که هنوز در پلتفرم مشخص منتشر نشده‌اند
-    
-    Args:
-        limit: تعداد مقالات
-        platform: نام پلتفرم (bale, rubika, ...)
-    
-    Returns:
-        لیست تاپل‌های (Article, AIProcessing, Link)
-    """
+def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
     session = SessionLocal()
     try:
-        # پیدا کردن مقالاتی که قبلاً در این پلتفرم منتشر شده‌اند
-        subquery = (
-            session.query(PublishLog.article_id)
-            .filter(
+        published_select = (
+            select(PublishLog.article_id)
+            .where(
                 PublishLog.platform == platform,
                 PublishLog.status == "success"
             )
-            .subquery()
         )
-        
-        # دریافت مقالات بازنویسی شده که منتشر نشده‌اند
+
         results = (
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
             .join(Link, Link.id == Article.link_id)
-            .filter(~Article.id.in_(subquery))
+            .filter(~Article.id.in_(published_select))
             .order_by(Article.id.asc())
             .limit(limit)
             .all()
         )
-        
         return results
-        
     except Exception as e:
         logger.error(f"Error fetching unpublished articles for {platform}: {str(e)}")
         return []
@@ -63,51 +45,39 @@ def get_unpublished_ai_articles(
 
 
 def publish(platform: str = "bale", limit: int = 10):
-    """
-    انتشار مقالات در پلتفرم مشخص
-    
-    Args:
-        platform: نام پلتفرم (bale, rubika, ...)
-        limit: تعداد مقالات برای انتشار
-    """
-    # بررسی پلتفرم معتبر
     if platform not in PLATFORMS:
         logger.error(f"Unknown platform: {platform}. Available: {list(PLATFORMS.keys())}")
         return
-    
+
     send_func = PLATFORMS[platform]
     session = SessionLocal()
-    
+
     try:
-        # دریافت مقالات منتشر نشده
         items = get_unpublished_ai_articles(limit=limit, platform=platform)
-        
         if not items:
             logger.info(f"No articles to publish on {platform}.")
             return
-        
+
         logger.info(f"{len(items)} articles found for {platform} publishing.")
-        
-        # ارسال هر مقاله
+
         for article, ai_proc, link in items:
             title = ai_proc.rewritten_title or article.title or ""
             content = ai_proc.rewritten_content or ""
-            
-            # بررسی محتوای خالی
+
             if not content.strip():
                 logger.warning(f"Article {article.id} has empty content, skipping.")
-                session.add(
-                    PublishLog(
-                        article_id=article.id,
-                        platform=platform,
-                        status="failed",
-                        error_message="Empty content"
-                    )
-                )
-                session.commit()
                 continue
-            
-            # تلاش برای ارسال
+
+            # دوباره چک لحظه‌ای (double-check)
+            exists = session.query(PublishLog.id).filter(
+                PublishLog.article_id == article.id,
+                PublishLog.platform == platform,
+                PublishLog.status == "success"
+            ).first()
+            if exists:
+                logger.info(f"Article {article.id} already published on {platform}, skipping.")
+                continue
+
             try:
                 send_func(
                     title=title,
@@ -115,8 +85,7 @@ def publish(platform: str = "bale", limit: int = 10):
                     image_url=article.image_url,
                     source_url=link.url if link else None
                 )
-                
-                # ثبت موفقیت
+
                 session.add(
                     PublishLog(
                         article_id=article.id,
@@ -126,12 +95,14 @@ def publish(platform: str = "bale", limit: int = 10):
                 )
                 session.commit()
                 logger.success(f"Article {article.id} published on {platform}.")
-                
-            except Exception as e:
-                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
+
+            except IntegrityError:
                 session.rollback()
-                
-                # ثبت خطا
+                logger.warning(f"Duplicate prevented by DB for article={article.id}, platform={platform}.")
+
+            except Exception as e:
+                session.rollback()
+                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
                 try:
                     session.add(
                         PublishLog(
@@ -143,15 +114,8 @@ def publish(platform: str = "bale", limit: int = 10):
                     )
                     session.commit()
                 except Exception as log_error:
-                    logger.error(f"Failed to log error: {log_error}")
                     session.rollback()
-    
+                    logger.error(f"Failed to log error: {log_error}")
+
     finally:
         session.close()
-
-
-def publish_to_bale(limit: int = 10):
-    """
-    تابع سازگار با نسخه قبلی برای انتشار در بله
-    """
-    publish(platform="bale", limit=limit)

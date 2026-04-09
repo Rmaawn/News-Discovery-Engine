@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy import UniqueConstraint, Index
 
 from .db import Base
 
@@ -88,18 +89,18 @@ class PublishLog(Base):
     __tablename__ = "publish_log"
 
     id = Column(Integer, primary_key=True)
-
     article_id = Column(Integer, ForeignKey("articles.id"))
-
     platform = Column(String)
-
     status = Column(String, default="pending")
-
     published_url = Column(String)
-
     error_message = Column(Text)
-
     created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("article_id", "platform", name="uq_publish_article_platform"),
+        Index("ix_publish_platform_status_article", "platform", "status", "article_id"),
+    )
+
 
 
 class SystemLog(Base):
