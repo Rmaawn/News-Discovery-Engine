@@ -1,12 +1,14 @@
 from typing import List, Tuple
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-
+from datetime import datetime, timedelta
 from database.db import SessionLocal
 from database.models import Article, AIProcessing, PublishLog, Link
 from utils.logger import Logger
 from publisher.bale import send_article_to_bale
 from publisher.rubika import send_article_to_rubika
+
+HOURLY_LIMIT = 8
 
 logger = Logger(module="publisher")
 
@@ -14,6 +16,16 @@ PLATFORMS = {
     "bale": send_article_to_bale,
     "rubika": send_article_to_rubika,
 }
+
+def get_published_count_last_hour(session, platform: str) -> int:
+    cutoff = datetime.now() - timedelta(hours=1)
+    return (
+        session.query(PublishLog)
+        .filter(PublishLog.platform == platform)
+        .filter(PublishLog.status == "success")
+        .filter(PublishLog.created_at >= cutoff)
+        .count()
+    )
 
 
 def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
@@ -68,6 +80,14 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
             if not title or not content:
                 logger.warning(f"Article {article.id} is missing title/content, skipping.")
                 continue
+            
+                        # --- محدودیت ساعتی ---
+            if get_published_count_last_hour(session, platform) >= HOURLY_LIMIT:
+                logger.info(
+                    f"Hourly limit reached for {platform}. Skipping further publishes."
+                )
+                break
+
 
             # --- رزرو قبل از ارسال (pending) ---
             try:

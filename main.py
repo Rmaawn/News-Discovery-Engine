@@ -15,7 +15,7 @@ from run_04_publisher import run as run_publisher
 logger = Logger(module="main_scheduler")
 
 # تنظیمات زمان‌بندی
-CYCLE_SECONDS = 60 * 60   # یک ساعت
+CYCLE_SECONDS = 60 * 17   # یک ساعت
 GAP_SECONDS = 12    # فاصله بین هر فاز (اینجا 12 دقیقه)
 TARGET_PUBLISHED = 8
 RETRY_SLEEP_SECONDS = 90   # اگر صفر بود، کمی صبر کند
