@@ -19,19 +19,18 @@ PLATFORMS = {
 def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
     session = SessionLocal()
     try:
-        published_select = (
+        # هر مقاله‌ای که هر رکوردی برای این پلتفرم دارد (pending/success/failed) فعلاً انتخاب نشود
+        existing_select = (
             select(PublishLog.article_id)
-            .where(
-                PublishLog.platform == platform,
-                PublishLog.status == "success"
-            )
+            .where(PublishLog.platform == platform)
         )
 
         results = (
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
             .join(Link, Link.id == Article.link_id)
-            .filter(~Article.id.in_(published_select))
+            .filter(~Article.id.in_(existing_select))
+            .filter(Article.image_url.isnot(None))  # فقط خبر تصویردار
             .order_by(Article.id.asc())
             .limit(limit)
             .all()
@@ -44,6 +43,7 @@ def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article
         session.close()
 
 
+
 def publish(platform: str = "bale", limit: int = 10) -> int:
     if platform not in PLATFORMS:
         logger.error(f"Unknown platform: {platform}. Available: {list(PLATFORMS.keys())}")
@@ -51,7 +51,6 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
 
     send_func = PLATFORMS[platform]
     session = SessionLocal()
-
     success_count = 0
 
     try:
@@ -63,22 +62,30 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
         logger.info(f"{len(items)} articles found for {platform} publishing.")
 
         for article, ai_proc, link in items:
-            title = ai_proc.rewritten_title or article.title or ""
-            content = ai_proc.rewritten_content or ""
+            title = ai_proc.rewritten_title or article.title
+            content = ai_proc.rewritten_content
 
-            if not content.strip():
-                logger.warning(f"Article {article.id} has empty content, skipping.")
+            if not title or not content:
+                logger.warning(f"Article {article.id} is missing title/content, skipping.")
                 continue
 
-            exists = session.query(PublishLog.id).filter(
-                PublishLog.article_id == article.id,
-                PublishLog.platform == platform,
-                PublishLog.status == "success"
-            ).first()
-            if exists:
-                logger.info(f"Article {article.id} already published on {platform}, skipping.")
+            # --- رزرو قبل از ارسال (pending) ---
+            try:
+                publish_log = PublishLog(
+                    article_id=article.id,
+                    platform=platform,
+                    status="pending",
+                )
+                session.add(publish_log)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                logger.warning(
+                    f"Duplicate prevented by DB BEFORE send for article={article.id}, platform={platform}."
+                )
                 continue
 
+            # --- ارسال ---
             try:
                 send_func(
                     title=title,
@@ -87,39 +94,23 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
                     source_url=link.url if link else None
                 )
 
-                session.add(
-                    PublishLog(
-                        article_id=article.id,
-                        platform=platform,
-                        status="success"
-                    )
-                )
+                publish_log.status = "success"
                 session.commit()
                 success_count += 1
                 logger.success(f"Article {article.id} published on {platform}.")
 
-            except IntegrityError:
-                session.rollback()
-                logger.warning(f"Duplicate prevented by DB for article={article.id}, platform={platform}.")
-
             except Exception as e:
                 session.rollback()
-                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
                 try:
-                    session.add(
-                        PublishLog(
-                            article_id=article.id,
-                            platform=platform,
-                            status="failed",
-                            error_message=str(e)
-                        )
-                    )
+                    publish_log.status = "failed"
                     session.commit()
-                except Exception as log_error:
+                except Exception:
                     session.rollback()
-                    logger.error(f"Failed to log error: {log_error}")
+
+                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
 
     finally:
         session.close()
 
     return success_count
+

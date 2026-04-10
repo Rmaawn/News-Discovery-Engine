@@ -47,6 +47,8 @@ def fetch_article(link_id, url, source_id):
 
         if not clean_text.strip():
             raise ValueError("Parsed clean_text is empty")
+        if not image_url or not str(image_url).strip():
+            raise ValueError("Parsed image_url is empty (strict mode)")
 
         content_hash = hashlib.md5(clean_text.encode("utf-8")).hexdigest()
         word_count = len(clean_text.split())

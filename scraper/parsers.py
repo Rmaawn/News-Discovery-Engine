@@ -9,12 +9,45 @@ def parse_tasnim(html: str, url: str) -> dict:
     title_tag = soup.find("h1", class_="title")
     title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
 
+    # استخراج تصویر با چند fallback
     image_url = None
-    img_tag = soup.find("img", class_="img-responsive")
-    if img_tag and img_tag.get("src"):
-        image_url = img_tag["src"]
-        if not image_url.startswith("http"):
-            image_url = urljoin(url, image_url)
+
+    # 1) og:image
+    og = soup.select_one('meta[property="og:image"]')
+    if og and og.get("content"):
+        image_url = og.get("content").strip()
+
+    # 2) twitter:image
+    if not image_url:
+        tw = soup.select_one('meta[name="twitter:image"]')
+        if tw and tw.get("content"):
+            image_url = tw.get("content").strip()
+
+    # 3) تصویرهای داخل محدوده خبر
+    if not image_url:
+        candidate_selectors = [
+            "div.photo img",
+            "figure img",
+            "div.story img",
+            "img.img-responsive",
+            "article img",
+        ]
+        for sel in candidate_selectors:
+            img = soup.select_one(sel)
+            if not img:
+                continue
+            src = (
+                img.get("src")
+                or img.get("data-src")
+                or img.get("data-original")
+                or img.get("data-lazy-src")
+            )
+            if src:
+                image_url = src.strip()
+                break
+
+    if image_url and not image_url.startswith("http"):
+        image_url = urljoin(url, image_url)
 
     story_div = soup.find("div", class_="story")
     if story_div:

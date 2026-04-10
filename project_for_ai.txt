@@ -331,14 +331,21 @@ from database.models import Link, Source
 from utils.logger import Logger
 from utils.retry import retry_on_error
 from discovery.sources import SOURCES
+from utils.source_health import is_blocked, mark_fail, mark_success
+from utils.http_client import build_session, random_headers
 
 logger = Logger(module="crawler_phase_1")
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
+SESSION = build_session()
 
 @retry_on_error(max_retries=6, logger=logger)
 def get_news_links(source: dict, limit: int = 100) -> list:
-    response = requests.get(source["url"], headers=HEADERS, timeout=15)
+    response = SESSION.get(
+        source["url"],
+        headers=random_headers({
+            "Referer": source.get("base_url", source["url"])
+        }),
+        timeout=(10, 20),  # (connect, read)
+    )
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -390,18 +397,28 @@ def save_links_to_db(links: list, source_id: int):
 
 def run_all_sources(limit_per_source: int = 15):
     for source in SOURCES:
-        if not source.get("enabled", True):
-            logger.info(f"Source disabled, skipping: {source['name']}")
+        name = source["name"]
+
+        if is_blocked(name):
+            logger.warning(f"Source temporarily blocked (circuit breaker): {name}")
             continue
-        logger.info(f"Crawling source: {source['name']}")
+
+        if not source.get("enabled", True):
+            logger.info(f"Source disabled, skipping: {name}")
+            continue
+
+        logger.info(f"Crawling source: {name}")
         try:
             links = get_news_links(source, limit=limit_per_source)
             if links:
                 save_links_to_db(links, source_id=source["id"])
+                mark_success(name)
             else:
-                logger.warning(f"No links found for {source['name']}")
+                logger.warning(f"No links found for {name}")
+                mark_fail(name)
         except Exception as e:
-            logger.error(f"Failed to crawl {source['name']}: {e}")
+            logger.error(f"Failed to crawl {name}: {e}")
+            mark_fail(name)
 
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\discovery\sources.py
@@ -586,8 +603,8 @@ SEND_MESSAGE_ENDPOINT = f"{BALE_BASE_URL}/sendMessage"
 SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"
 # ============================================
 
-TITLE_PREFIX = "🆎🆎"
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews🟣⚫️"
+TITLE_PREFIX = ""
+FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
 
 
 def build_bale_caption(title: str, content: str, source_url: Optional[str] = None) -> str:
@@ -738,7 +755,6 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
 
     send_func = PLATFORMS[platform]
     session = SessionLocal()
-
     success_count = 0
 
     try:
@@ -750,22 +766,30 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
         logger.info(f"{len(items)} articles found for {platform} publishing.")
 
         for article, ai_proc, link in items:
-            title = ai_proc.rewritten_title or article.title or ""
-            content = ai_proc.rewritten_content or ""
+            title = ai_proc.rewritten_title or article.title
+            content = ai_proc.rewritten_content
 
-            if not content.strip():
-                logger.warning(f"Article {article.id} has empty content, skipping.")
+            if not title or not content:
+                logger.warning(f"Article {article.id} is missing title/content, skipping.")
                 continue
 
-            exists = session.query(PublishLog.id).filter(
-                PublishLog.article_id == article.id,
-                PublishLog.platform == platform,
-                PublishLog.status == "success"
-            ).first()
-            if exists:
-                logger.info(f"Article {article.id} already published on {platform}, skipping.")
+            # --- رزرو قبل از ارسال (pending) ---
+            try:
+                publish_log = PublishLog(
+                    article_id=article.id,
+                    platform=platform,
+                    status="pending",
+                )
+                session.add(publish_log)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                logger.warning(
+                    f"Duplicate prevented by DB BEFORE send for article={article.id}, platform={platform}."
+                )
                 continue
 
+            # --- ارسال ---
             try:
                 send_func(
                     title=title,
@@ -774,42 +798,26 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
                     source_url=link.url if link else None
                 )
 
-                session.add(
-                    PublishLog(
-                        article_id=article.id,
-                        platform=platform,
-                        status="success"
-                    )
-                )
+                publish_log.status = "success"
                 session.commit()
                 success_count += 1
                 logger.success(f"Article {article.id} published on {platform}.")
 
-            except IntegrityError:
-                session.rollback()
-                logger.warning(f"Duplicate prevented by DB for article={article.id}, platform={platform}.")
-
             except Exception as e:
                 session.rollback()
-                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
                 try:
-                    session.add(
-                        PublishLog(
-                            article_id=article.id,
-                            platform=platform,
-                            status="failed",
-                            error_message=str(e)
-                        )
-                    )
+                    publish_log.status = "failed"
                     session.commit()
-                except Exception as log_error:
+                except Exception:
                     session.rollback()
-                    logger.error(f"Failed to log error: {log_error}")
+
+                logger.error(f"Failed to publish Article {article.id} on {platform}: {e}")
 
     finally:
         session.close()
 
     return success_count
+
 
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\publisher\rubika.py
@@ -1018,15 +1026,28 @@ FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\extractor.py
 FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\fetcher.py
 ==============================
 # scraper/fetcher.py
-import requests
 import hashlib
 from datetime import datetime, timedelta
 from sqlalchemy import or_, and_
+import requests
+
 from database.db import SessionLocal
 from database.models import Link, Article
 from scraper.parsers import PARSERS
+from utils.logger import Logger
+from utils.retry import retry_on_error
+from utils.http_client import build_session, random_headers
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+logger = Logger(module="scraper_phase_2")
+SESSION = build_session()
+
+
+@retry_on_error(max_retries=3, logger=logger)
+def _http_get(url: str, referer: str | None = None) -> str:
+    headers = random_headers({"Referer": referer} if referer else None)
+    resp = SESSION.get(url, headers=headers, timeout=(10, 25))
+    resp.raise_for_status()
+    return resp.text
 
 
 def fetch_article(link_id, url, source_id):
@@ -1035,26 +1056,35 @@ def fetch_article(link_id, url, source_id):
     try:
         link = db.query(Link).filter(Link.id == link_id).first()
         if not link:
-            print(f"❌ Link not found: {link_id}")
+            logger.error(f"Link not found: {link_id}")
             return False
 
         link.status = "fetching"
         link.last_checked_at = datetime.now()
         db.commit()
 
-        response = requests.get(url, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-        html = response.text
+        html = _http_get(url, referer=url)
 
         parser = PARSERS.get(source_id, PARSERS[1])
         parsed = parser(html, url)
 
         title = parsed["title"]
         image_url = parsed["image_url"]
-        clean_text = parsed["clean_text"]
+        clean_text = parsed["clean_text"] or ""
 
-        content_hash = hashlib.md5(clean_text.encode()).hexdigest()
+        if not clean_text.strip():
+            raise ValueError("Parsed clean_text is empty")
+
+        content_hash = hashlib.md5(clean_text.encode("utf-8")).hexdigest()
         word_count = len(clean_text.split())
+
+        # جلوگیری از ذخیره مقاله تکراری
+        dup = db.query(Article.id).filter(Article.content_hash == content_hash).first()
+        if dup:
+            link.status = "fetched"
+            db.commit()
+            logger.info(f"Duplicate content detected for link={link_id}, skipped article insert.")
+            return True
 
         db.add(Article(
             link_id=link_id,
@@ -1069,7 +1099,7 @@ def fetch_article(link_id, url, source_id):
 
         link.status = "fetched"
         db.commit()
-        print(f"✅ {title[:50]}...")
+        logger.success(f"Fetched article: {title[:60]}")
         return True
 
     except Exception as e:
@@ -1083,12 +1113,11 @@ def fetch_article(link_id, url, source_id):
             link.last_checked_at = datetime.now()
             db.commit()
 
-        print(f"❌ Error: {str(e)[:120]}")
+        logger.error(f"Fetch failed link_id={link_id}: {str(e)[:180]}")
         return False
 
     finally:
         db.close()
-
 
 
 def process_new_links(limit=10, max_retries=3, retry_cooldown_minutes=30):
@@ -1115,18 +1144,16 @@ def process_new_links(limit=10, max_retries=3, retry_cooldown_minutes=30):
             .limit(limit)
             .all()
         )
-
     finally:
         db.close()
 
-    print(f"\n🔄 Processing {len(links)} links...\n")
+    logger.info(f"Processing {len(links)} links...")
     success = 0
     for link in links:
         if fetch_article(link.id, link.url, link.source_id):
             success += 1
 
-    print(f"\n✅ {success}/{len(links)} articles fetched successfully")
-
+    logger.info(f"Fetch done: {success}/{len(links)} success")
 
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\scraper\parsers.py
@@ -1210,6 +1237,66 @@ PARSERS = {
     2: parse_isna,
     3: parse_farsnews,
 }
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\http_client.py
+==============================
+# utils/http_client.py
+import random
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# چند User-Agent واقعی (Desktop/Mobile)
+USER_AGENTS = [
+    # Chrome Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    # Chrome Android
+    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36",
+    # Firefox Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) "
+    "Gecko/20100101 Firefox/124.0",
+]
+
+DEFAULT_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.7,en;q=0.6",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+def build_session() -> requests.Session:
+    s = requests.Session()
+
+    retry = Retry(
+        total=4,
+        connect=4,
+        read=3,
+        status=3,
+        backoff_factor=1.2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "HEAD"]),
+        raise_on_status=False,
+    )
+
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+
+    # هدر پایه
+    s.headers.update(DEFAULT_HEADERS)
+    return s
+
+
+def random_headers(extra: dict | None = None) -> dict:
+    h = dict(DEFAULT_HEADERS)
+    h["User-Agent"] = random.choice(USER_AGENTS)
+    if extra:
+        h.update(extra)
+    return h
 
 ==============================
 FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\logger.py
@@ -1296,4 +1383,36 @@ def retry_on_error(max_retries=8, logger=None):
                     raise
         return wrapper
     return decorator
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\utils\source_health.py
+==============================
+# utils/source_health.py
+from datetime import datetime, timedelta
+
+_state = {}  # {source_name: {"fails": int, "blocked_until": datetime | None}}
+
+FAIL_THRESHOLD = 3
+BLOCK_MINUTES = 45
+
+
+def is_blocked(source_name: str) -> bool:
+    st = _state.get(source_name)
+    if not st:
+        return False
+    bu = st.get("blocked_until")
+    return bool(bu and datetime.now() < bu)
+
+
+def mark_success(source_name: str):
+    _state[source_name] = {"fails": 0, "blocked_until": None}
+
+
+def mark_fail(source_name: str):
+    st = _state.get(source_name, {"fails": 0, "blocked_until": None})
+    st["fails"] += 1
+    if st["fails"] >= FAIL_THRESHOLD:
+        st["blocked_until"] = datetime.now() + timedelta(minutes=BLOCK_MINUTES)
+        st["fails"] = 0
+    _state[source_name] = st
 
