@@ -723,19 +723,18 @@ PLATFORMS = {
 def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
     session = SessionLocal()
     try:
-        published_select = (
+        # هر مقاله‌ای که هر رکوردی برای این پلتفرم دارد (pending/success/failed) فعلاً انتخاب نشود
+        existing_select = (
             select(PublishLog.article_id)
-            .where(
-                PublishLog.platform == platform,
-                PublishLog.status == "success"
-            )
+            .where(PublishLog.platform == platform)
         )
 
         results = (
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
             .join(Link, Link.id == Article.link_id)
-            .filter(~Article.id.in_(published_select))
+            .filter(~Article.id.in_(existing_select))
+            .filter(Article.image_url.isnot(None))  # فقط خبر تصویردار
             .order_by(Article.id.asc())
             .limit(limit)
             .all()
@@ -746,6 +745,7 @@ def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article
         return []
     finally:
         session.close()
+
 
 
 def publish(platform: str = "bale", limit: int = 10) -> int:
@@ -1074,6 +1074,8 @@ def fetch_article(link_id, url, source_id):
 
         if not clean_text.strip():
             raise ValueError("Parsed clean_text is empty")
+        if not image_url or not str(image_url).strip():
+            raise ValueError("Parsed image_url is empty (strict mode)")
 
         content_hash = hashlib.md5(clean_text.encode("utf-8")).hexdigest()
         word_count = len(clean_text.split())
@@ -1169,12 +1171,45 @@ def parse_tasnim(html: str, url: str) -> dict:
     title_tag = soup.find("h1", class_="title")
     title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
 
+    # استخراج تصویر با چند fallback
     image_url = None
-    img_tag = soup.find("img", class_="img-responsive")
-    if img_tag and img_tag.get("src"):
-        image_url = img_tag["src"]
-        if not image_url.startswith("http"):
-            image_url = urljoin(url, image_url)
+
+    # 1) og:image
+    og = soup.select_one('meta[property="og:image"]')
+    if og and og.get("content"):
+        image_url = og.get("content").strip()
+
+    # 2) twitter:image
+    if not image_url:
+        tw = soup.select_one('meta[name="twitter:image"]')
+        if tw and tw.get("content"):
+            image_url = tw.get("content").strip()
+
+    # 3) تصویرهای داخل محدوده خبر
+    if not image_url:
+        candidate_selectors = [
+            "div.photo img",
+            "figure img",
+            "div.story img",
+            "img.img-responsive",
+            "article img",
+        ]
+        for sel in candidate_selectors:
+            img = soup.select_one(sel)
+            if not img:
+                continue
+            src = (
+                img.get("src")
+                or img.get("data-src")
+                or img.get("data-original")
+                or img.get("data-lazy-src")
+            )
+            if src:
+                image_url = src.strip()
+                break
+
+    if image_url and not image_url.startswith("http"):
+        image_url = urljoin(url, image_url)
 
     story_div = soup.find("div", class_="story")
     if story_div:
