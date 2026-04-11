@@ -1,0 +1,8 @@
+{
+  "disks": [
+    {
+      "name": "news",
+      "mountTo": "database"
+    }
+  ]
+}

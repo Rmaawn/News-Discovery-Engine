@@ -3,7 +3,6 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-# بارگذاری env یکبار در شروع
 load_dotenv(".env")
 
 from utils.logger import Logger
@@ -14,12 +13,12 @@ from run_04_publisher import run as run_publisher
 
 logger = Logger(module="main_scheduler")
 
-# تنظیمات زمان‌بندی
-CYCLE_SECONDS = 60 * 17   # یک ساعت
-GAP_SECONDS = 12    # فاصله بین هر فاز (اینجا 12 دقیقه)
-TARGET_PUBLISHED = 8
-RETRY_SLEEP_SECONDS = 90   # اگر صفر بود، کمی صبر کند
-MAX_TRIES_PER_CYCLE = 10   # جلوگیری از گیر افتادن بی‌نهایت
+#  تنظیمات
+CYCLE_SECONDS = 60 * 10   # هر 10 دقیقه
+GAP_SECONDS = 3           # فاصله کوتاه بین فازها
+TARGET_PUBLISHED = 1
+RETRY_SLEEP_SECONDS = 15
+MAX_TRIES_PER_CYCLE = 1   # فقط یک تلاش در هر چرخه
 
 def run_phase(name, func):
     logger.info(f"Starting phase: {name}")
@@ -32,7 +31,6 @@ def run_phase(name, func):
         elapsed = time.time() - start
         logger.error(f"Phase '{name}' failed after {elapsed:.1f}s: {e}")
 
-
 def main():
     logger.info("Main scheduler started.")
 
@@ -42,11 +40,15 @@ def main():
         logger.info(f"New cycle started at {cycle_start_human}")
 
         published_total = 0
-        tries = 0
 
-        while published_total < TARGET_PUBLISHED and tries < MAX_TRIES_PER_CYCLE:
-            tries += 1
-            logger.info(f"Attempt {tries}: target={TARGET_PUBLISHED}, current={published_total}")
+        #  تا زمانی که زمان چرخه تمام نشده و هنوز 1 خبر منتشر نشده
+        while published_total < 1:
+            elapsed = time.time() - cycle_start
+            remaining = CYCLE_SECONDS - elapsed
+
+            if remaining <= 15:  # 15 ثانیه آخر دیگر تلاش جدید نکن
+                logger.warning("Cycle almost finished, stopping retries.")
+                break
 
             run_phase("crawler", run_crawler)
             time.sleep(GAP_SECONDS)
@@ -57,7 +59,6 @@ def main():
             run_phase("ai_rewrite", run_ai)
             time.sleep(GAP_SECONDS)
 
-            # فاز انتشار و گرفتن تعداد موفق
             try:
                 published_now = run_publisher()
             except Exception as e:
@@ -67,15 +68,10 @@ def main():
             published_total += published_now
 
             if published_now == 0:
-                logger.warning("No new published items. Waiting before retry...")
+                logger.warning("No publish, retrying within cycle...")
                 time.sleep(RETRY_SLEEP_SECONDS)
 
-        if published_total < TARGET_PUBLISHED:
-            logger.warning(
-                f"Could not reach target ({TARGET_PUBLISHED}). Published={published_total}. "
-                f"Starting next cycle anyway."
-            )
-
+        # پایان چرخه
         elapsed_cycle = time.time() - cycle_start
         remaining = CYCLE_SECONDS - elapsed_cycle
         if remaining > 0:
@@ -83,9 +79,8 @@ def main():
             time.sleep(remaining)
         else:
             logger.warning(
-                f"Cycle took longer than 1 hour by {abs(remaining):.1f}s. Starting next cycle immediately."
+                f"Cycle took longer than 10 minutes by {abs(remaining):.1f}s. Starting next cycle immediately."
             )
-
 
 if __name__ == "__main__":
     main()

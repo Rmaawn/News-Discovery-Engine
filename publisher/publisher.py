@@ -8,7 +8,7 @@ from utils.logger import Logger
 from publisher.bale import send_article_to_bale
 from publisher.rubika import send_article_to_rubika
 
-HOURLY_LIMIT = 8
+HOURLY_LIMIT = 6
 
 logger = Logger(module="publisher")
 
