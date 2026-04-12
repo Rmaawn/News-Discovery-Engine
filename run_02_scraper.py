@@ -4,7 +4,7 @@ from scraper.fetcher import process_new_links
 from utils.logger import Logger
 
 # Configs
-FETCH_LIMIT = 2
+FETCH_LIMIT = 1
 MAX_RETRIES = 8
 RETRY_COOLDOWN_MINUTES = 30
 

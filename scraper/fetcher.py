@@ -20,6 +20,7 @@ def _http_get(url: str, referer: str | None = None) -> str:
     headers = random_headers({"Referer": referer} if referer else None)
     resp = SESSION.get(url, headers=headers, timeout=(10, 25))
     resp.raise_for_status()
+    resp.encoding = "utf-8"
     return resp.text
 
 
@@ -36,7 +37,7 @@ def fetch_article(link_id, url, source_id):
         link.last_checked_at = datetime.now()
         db.commit()
 
-        html = _http_get(url, referer=url)
+        html = _http_get(url)
 
         parser = PARSERS.get(source_id, PARSERS[1])
         parsed = parser(html, url)
@@ -46,7 +47,11 @@ def fetch_article(link_id, url, source_id):
         clean_text = parsed["clean_text"] or ""
 
         if not clean_text.strip():
-            raise ValueError("Parsed clean_text is empty")
+            link.status = "ignored"
+            link.error_message = "empty content"
+            db.commit()
+            logger.warning(f"Ignored link (no content): {url}")
+            return False
         if not image_url or not str(image_url).strip():
             raise ValueError("Parsed image_url is empty (strict mode)")
 

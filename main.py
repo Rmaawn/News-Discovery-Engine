@@ -18,7 +18,7 @@ CYCLE_SECONDS = 60 * 10   # هر 10 دقیقه
 GAP_SECONDS = 3           # فاصله کوتاه بین فازها
 TARGET_PUBLISHED = 1
 RETRY_SLEEP_SECONDS = 15
-MAX_TRIES_PER_CYCLE = 1   # فقط یک تلاش در هر چرخه
+MAX_TRIES_PER_CYCLE = 2   # فقط یک تلاش در هر چرخه
 
 def run_phase(name, func):
     logger.info(f"Starting phase: {name}")

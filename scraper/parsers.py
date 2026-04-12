@@ -103,10 +103,55 @@ def parse_farsnews(html: str, url: str) -> dict:
 
     return {"title": title, "image_url": image_url, "clean_text": clean_text}
 
+def parse_tabnak(html: str, url: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    # --- title ---
+    title_tag = soup.select_one("h1.Htag")
+    title = title_tag.get_text(strip=True) if title_tag else "بدون عنوان"
+
+    # --- image ---
+    image_url = None
+    img_tag = soup.select_one("img.news_corner_image")
+
+    if img_tag:
+        image_url = (
+            img_tag.get("src")
+            or img_tag.get("data-src")
+            or img_tag.get("data-original")
+            or img_tag.get("data-lazy-src")
+        )
+
+        if image_url:
+            image_url = image_url.strip()
+
+            # اگر لینک نسبی بود، کاملش کن
+            if not image_url.startswith("http"):
+                from urllib.parse import urljoin
+                image_url = urljoin(url, image_url)
+    # --- content ---
+    body = soup.select_one("#newsMainBody")
+
+    if body:
+        for tag in body.find_all(["script", "style", "aside"]):
+            tag.decompose()
+
+        clean_text = body.get_text(separator="\n", strip=True)
+    else:
+        clean_text = ""
+
+    return {
+        "title": title,
+        "image_url": image_url,
+        "clean_text": clean_text
+    }
+
+
 
 # نگاشت source_id به parser مربوطه
 PARSERS = {
     1: parse_tasnim,
     2: parse_isna,
     3: parse_farsnews,
+    4: parse_tabnak,
 }

@@ -2,7 +2,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-
+import xml.etree.ElementTree as ET
 from database.db import SessionLocal
 from database.models import Link, Source
 from utils.logger import Logger
@@ -13,6 +13,32 @@ from utils.http_client import build_session, random_headers
 
 logger = Logger(module="crawler_phase_1")
 SESSION = build_session()
+
+
+@retry_on_error(max_retries=6, logger=logger)
+def get_rss_links(source: dict, limit: int = 100) -> list:
+    response = SESSION.get(source["url"], timeout=(10, 20))
+    response.raise_for_status()
+
+    root = ET.fromstring(response.content)
+
+    links = []
+    links_set = set()
+
+    for item in root.findall(".//item"):
+        link_el = item.find("link")
+        if link_el is None:
+            continue
+
+        url = link_el.text.strip()
+        if url and url not in links_set:
+            links.append(url)
+            links_set.add(url)
+
+        if len(links) >= limit:
+            break
+
+    return links
 
 @retry_on_error(max_retries=6, logger=logger)
 def get_news_links(source: dict, limit: int = 100) -> list:
@@ -86,7 +112,10 @@ def run_all_sources(limit_per_source: int = 15):
 
         logger.info(f"Crawling source: {name}")
         try:
-            links = get_news_links(source, limit=limit_per_source)
+            if source.get("is_rss"):
+                links = get_rss_links(source, limit=limit_per_source)
+            else:
+                links = get_news_links(source, limit=limit_per_source)
             if links:
                 save_links_to_db(links, source_id=source["id"])
                 mark_success(name)
