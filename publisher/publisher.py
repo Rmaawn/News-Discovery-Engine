@@ -7,6 +7,7 @@ from database.models import Article, AIProcessing, PublishLog, Link
 from utils.logger import Logger
 from publisher.bale import send_article_to_bale
 from publisher.rubika import send_article_to_rubika
+from publisher.eitaa import send_article_to_eitaa
 
 HOURLY_LIMIT = 6
 
@@ -15,6 +16,7 @@ logger = Logger(module="publisher")
 PLATFORMS = {
     "bale": send_article_to_bale,
     "rubika": send_article_to_rubika,
+    "eitaa": send_article_to_eitaa,
 }
 
 def get_published_count_last_hour(session, platform: str) -> int:

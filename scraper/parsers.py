@@ -112,7 +112,17 @@ def parse_tabnak(html: str, url: str) -> dict:
 
     # --- image ---
     image_url = None
-    img_tag = soup.select_one("img.news_corner_image")
+    candidate_selectors = [
+        "#newsMainBody img.img-responsive-news", # ساختار جدید (طبق عکس)
+        "img.pick_for_baznashr",                 # ساختار جدید (جایگزین)
+        "img.news_corner_image"                  # ساختار قبلی
+    ]
+
+    img_tag = None
+    for sel in candidate_selectors:
+        img_tag = soup.select_one(sel)
+        if img_tag:
+            break # اگر با یکی از سلکتورها پیدا شد، جستجو را متوقف کن
 
     if img_tag:
         image_url = (
@@ -154,4 +164,5 @@ PARSERS = {
     2: parse_isna,
     3: parse_farsnews,
     4: parse_tabnak,
+    5: parse_tasnim,
 }
