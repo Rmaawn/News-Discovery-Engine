@@ -45,17 +45,17 @@ SOURCES = [
 
     {
     "id": 4,
-    "name": "tabnak_calture_rss",
+    "name": "tabnak_rss",
     "url": "https://www.tabnak.ir/fa/rss/21",
-    "enabled": _env_bool("SOURCE_TABNAK_CALTURE_ENABLED", True),
+    "enabled": _env_bool("SOURCE_TABNAK_RSS_ENABLED", False),
     "is_rss": True,
     },
     
     {
     "id": 5,
-    "name": "tasnim_politic_rss",
+    "name": "tasnim_rss",
     "url": "https://www.tasnimnews.ir/fa/rss/feed/1/0/7/0/MostPupolar",
-    "enabled": _env_bool("SOURCE_TASNIM_POLITIC_ENABLED", True),
+    "enabled": _env_bool("SOURCE_TASNIM_Rss_ENABLED", False),
     "is_rss": True,
     },
 ]

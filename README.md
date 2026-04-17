@@ -8,7 +8,8 @@
 3) بازنویسی با هوش مصنوعی  
 4) انتشار خودکار در پیام‌رسان‌ها (بله / روبیکا)
 
-```
+![Logs of run](screenshot.png)
+
 
 ## ✨ Features
 
@@ -22,7 +23,7 @@
 - ✅ انتشار چندسکویی با `PublishLog` و کنترل تکرار
 - ✅ خروجی AI به‌صورت JSON معتبر (با `response_format`)
 
-```
+
 
 ## 🏗️ Architecture
 ```text
@@ -76,12 +77,11 @@ News Discovery Engine/
 ```
 
 ## ⚙️ Requirements
-
+```
 - Python 3.10+
 - SQLite (پیش‌فرض) یا هر دیتابیس سازگار با SQLAlchemy
 - API Key برای مدل بازنویسی
 - Token برای ربات بله و روبیکا
-
 ```
 
 ## 🚀 Quick Start
@@ -99,10 +99,15 @@ bash
 python -m venv .venv
 ```
 #### Windows:
+```
 .venv\Scripts\activate
+```
 #### Linux/Mac:
+```
 source .venv/bin/activate
-
+```
+#### Install:
+```
 pip install -r requirements.txt
 ```
 

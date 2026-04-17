@@ -10,6 +10,7 @@ from utils.retry import retry_on_error
 from discovery.sources import SOURCES
 from utils.source_health import is_blocked, mark_fail, mark_success
 from utils.http_client import build_session, random_headers
+from datetime import datetime
 
 logger = Logger(module="crawler_phase_1")
 SESSION = build_session()
@@ -99,8 +100,18 @@ def save_links_to_db(links: list, source_id: int):
 
 
 def run_all_sources(limit_per_source: int = 15):
+    current_hour = datetime.now().hour
+
     for source in SOURCES:
         name = source["name"]
+
+        # ⏰ کنترل بازه زمانی
+        if 0 <= current_hour < 12:
+            if source["id"] != 5:  # tasnim_politic_rss
+                continue
+        else:
+            if source["id"] != 4:  # tabnak_calture_rss
+                continue
 
         if is_blocked(name):
             logger.warning(f"Source temporarily blocked (circuit breaker): {name}")
@@ -111,17 +122,20 @@ def run_all_sources(limit_per_source: int = 15):
             continue
 
         logger.info(f"Crawling source: {name}")
+
         try:
             if source.get("is_rss"):
                 links = get_rss_links(source, limit=limit_per_source)
             else:
                 links = get_news_links(source, limit=limit_per_source)
+
             if links:
                 save_links_to_db(links, source_id=source["id"])
                 mark_success(name)
             else:
                 logger.warning(f"No links found for {name}")
                 mark_fail(name)
+
         except Exception as e:
             logger.error(f"Failed to crawl {name}: {e}")
             mark_fail(name)
