@@ -6,7 +6,7 @@ from utils.logger import Logger
 
 # تنظیمات
 PUBLISH_LIMIT = 2
-PLATFORMS = ["bale", "rubika",]  # لیست پلتفرم‌های فعال
+PLATFORMS = ["bale", "rubika","eitaa"]  # لیست پلتفرم‌های فعال
 
 logger = Logger(module="run_publisher")
 

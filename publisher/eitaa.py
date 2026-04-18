@@ -70,23 +70,31 @@ def send_file(
 
     url = f"{BASE_URL}/sendFile"
 
-    payload = {
+    # دانلود عکس
+    resp = requests.get(file_url, timeout=30)
+    resp.raise_for_status()
+    file_bytes = resp.content
+
+    data = {
         "chat_id": chat_id,
-        "file": file_url,  # مستقیم URL می‌فرستیم
     }
 
     if caption:
-        payload["caption"] = caption
+        data["caption"] = caption
 
-    response = requests.post(url, json=payload, timeout=30)
+    files = {
+        "file": ("news.jpg", file_bytes, "image/jpeg")
+    }
+
+    response = requests.post(url, data=data, files=files, timeout=30)
     response.raise_for_status()
 
-    data = response.json()
+    result = response.json()
 
-    if not data.get("ok"):
-        raise RuntimeError(f"Eitaa API error: {data}")
+    if not result.get("ok"):
+        raise RuntimeError(f"Eitaa API error: {result}")
 
-    return data
+    return result
 
 
 def send_article_to_eitaa(
