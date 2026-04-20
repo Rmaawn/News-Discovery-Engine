@@ -99,43 +99,131 @@ def save_links_to_db(links: list, source_id: int):
     logger.info(f"[source_id={source_id}] {new_links} new links saved")
 
 
+# def run_all_sources(limit_per_source: int = 15):
+
+#     # =========================================================
+#     # 🧪 TEST MODE (فعال برای توسعه)
+#     # در این حالت از تمام سورس‌های فعال، خبر گرفته می‌شود
+#     # بعد از اتمام تست، این بخش را کامنت کن
+#     # =========================================================
+#     for source in SOURCES:
+#         name = source["name"]
+
+#         if not source.get("enabled", True):
+#             continue
+
+#         if is_blocked(name):
+#             logger.warning(f"Source temporarily blocked: {name}")
+#             continue
+
+#         logger.info(f"[TEST MODE] Crawling source: {name}")
+
+#         try:
+#             if source.get("is_rss"):
+#                 links = get_rss_links(source, limit=1)
+#             else:
+#                 links = get_news_links(source, limit=1)
+
+#             if links:
+#                 save_links_to_db(links, source_id=source["id"])
+#                 mark_success(name)
+#             else:
+#                 logger.warning(f"No links found for {name}")
+#                 mark_fail(name)
+
+#         except Exception as e:
+#             logger.error(f"Failed to crawl {name}: {e}")
+#             mark_fail(name)
+
 def run_all_sources(limit_per_source: int = 15):
+
+    from datetime import datetime
+
+    # فقط سورس‌های فعال
+    active_sources = [s for s in SOURCES if s.get("enabled", True)]
+
+    if not active_sources:
+        logger.error("No active sources found!")
+        return
+
+    # شیفت ۸ ساعته
     current_hour = datetime.now().hour
+    index = (current_hour // 8) % len(active_sources)
 
-    for source in SOURCES:
-        name = source["name"]
+    source = active_sources[index]
+    name = source["name"]
 
-        # ⏰ کنترل بازه زمانی
-        if 0 <= current_hour < 12:
-            if source["id"] != 5:  # tasnim_politic_rss
-                continue
+    if is_blocked(name):
+        logger.warning(f"Source blocked: {name}")
+        return
+
+    logger.info(f"🔥 ACTIVE SHIFT SOURCE: {name}")
+
+    try:
+        if source.get("is_rss"):
+            links = get_rss_links(source, limit=limit_per_source)
         else:
-            if source["id"] != 4:  # tabnak_calture_rss
-                continue
+            links = get_news_links(source, limit=limit_per_source)
 
-        if is_blocked(name):
-            logger.warning(f"Source temporarily blocked (circuit breaker): {name}")
-            continue
-
-        if not source.get("enabled", True):
-            logger.info(f"Source disabled, skipping: {name}")
-            continue
-
-        logger.info(f"Crawling source: {name}")
-
-        try:
-            if source.get("is_rss"):
-                links = get_rss_links(source, limit=limit_per_source)
-            else:
-                links = get_news_links(source, limit=limit_per_source)
-
-            if links:
-                save_links_to_db(links, source_id=source["id"])
-                mark_success(name)
-            else:
-                logger.warning(f"No links found for {name}")
-                mark_fail(name)
-
-        except Exception as e:
-            logger.error(f"Failed to crawl {name}: {e}")
+        if links:
+            save_links_to_db(links, source_id=source["id"])
+            mark_success(name)
+        else:
+            logger.warning(f"No links found for {name}")
             mark_fail(name)
+
+    except Exception as e:
+        logger.error(f"Failed to crawl {name}: {e}")
+        mark_fail(name)  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+    # =========================================================
+    # 🚀 PRODUCTION MODE (بعد از تست فعال شود)
+    # این حالت باعث می‌شود هر 4 ساعت فقط یک سورس فعال باشد
+    # =========================================================
+
+    # current_hour = datetime.now().hour
+    # index = current_hour // 4  # 0 تا 5
+    #
+    # if index >= len(SOURCES):
+    #     index = 0
+    #
+    # source = SOURCES[index]
+    # name = source["name"]
+    #
+    # if not source.get("enabled", True):
+    #     logger.info(f"Source disabled: {name}")
+    #     return
+    #
+    # if is_blocked(name):
+    #     logger.warning(f"Source temporarily blocked: {name}")
+    #     return
+    #
+    # logger.info(f"[PRODUCTION MODE] Crawling source: {name}")
+    #
+    # try:
+    #     if source.get("is_rss"):
+    #         links = get_rss_links(source, limit=limit_per_source)
+    #     else:
+    #         links = get_news_links(source, limit=limit_per_source)
+    #
+    #     if links:
+    #         save_links_to_db(links, source_id=source["id"])
+    #         mark_success(name)
+    #     else:
+    #         logger.warning(f"No links found for {name}")
+    #         mark_fail(name)
+    #
+    # except Exception as e:
+    #     logger.error(f"Failed to crawl {name}: {e}")
+    #     mark_fail(name)

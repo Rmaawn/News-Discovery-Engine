@@ -4,7 +4,7 @@ load_dotenv(".env")
 from discovery.crawler import run_all_sources
 from utils.logger import Logger
 
-LIMIT_PER_SOURCE = 1
+LIMIT_PER_SOURCE = 2
 logger = Logger(module="crawler_phase_1")
 
 def run():

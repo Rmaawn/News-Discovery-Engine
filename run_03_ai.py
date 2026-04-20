@@ -4,7 +4,7 @@ from ai.rewrite import process_articles_with_ai
 from utils.logger import Logger
 
 # Configs
-AI_PROCESS_LIMIT = 2
+AI_PROCESS_LIMIT = 1
 
 logger = Logger(module="ai_phase_3")
 

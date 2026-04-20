@@ -1,62 +1,70 @@
-# discovery/sources.py
 import os
 
 def _env_bool(name: str, default: bool = True) -> bool:
     v = os.getenv(name, str(default)).strip().lower()
     return v in ("1", "true", "yes", "on")
 
-SOURCES = [
-{
-    "id": 1,
-    "name": "tasnim",
-    "url": "https://www.tasnimnews.ir/fa/news/overview/top",
-    "enabled": _env_bool("SOURCE_TASNIM_ENABLED", False),
-    "link_filter": lambda href: "/fa/news/" in href and "/fa/news/overview/" not in href and "/fa/media/" not in href,
-    "link_selector": "section.news-container.news-box section.content article.box-item a[href]",
-    "section_filter": lambda sec: (
-        (el := sec.select_one("header span.title")) is not None and
-        el.get_text(strip=True) == "آخرین خبرهای روز"
-    ),
-    "section_selector": "section.news-container.news-box",
-},
 
+SOURCES = [
+    {
+        "id": 1,
+        "name": "borna",
+        "url": "https://borna.news/fa/archive",
+        "base_url": "https://borna.news",
+        "enabled": _env_bool("SOURCE_BORNA_ENABLED", True),
+
+        "link_selector": "div.archive_content div.linear_news a.title5",
+        "link_filter": lambda href: "/fa/news/" in href,
+    },
     {
         "id": 2,
         "name": "isna",
-        "url": "https://www.isna.ir/",
-        "enabled": _env_bool("SOURCE_ISNA_ENABLED", False),   # پیش‌فرض خاموش
-        "link_filter": lambda href: "/news/" in href and href.startswith("/"),
-        "link_selector": "a[href]",
-        "section_filter": None,
-        "section_selector": None,
+        "url": "https://www.isna.ir/archive",
         "base_url": "https://www.isna.ir",
+        "enabled": _env_bool("SOURCE_ISNA_ENABLED", True),
+
+        "link_selector": "div.page.itemlist li.received h3 a",
+        "link_filter": lambda href: href.startswith("/news/"),
     },
     {
         "id": 3,
-        "name": "farsnews",
-        "url": "https://www.farsnews.ir/",
-        "enabled": _env_bool("SOURCE_FARS_ENABLED", False),   # پیش‌فرض خاموش
-        "link_filter": lambda href: "/news/" in href,
-        "link_selector": "a[href]",
-        "section_filter": None,
-        "section_selector": None,
-        "base_url": "https://www.farsnews.ir",
-    },
+        "name": "irna",
+        "url": "https://www.irna.ir/archive",
+        "base_url": "https://www.irna.ir",
+        "enabled": _env_bool("SOURCE_IRNA_ENABLED", True),
 
-    {
-    "id": 4,
-    "name": "tabnak_rss",
-    "url": "https://www.tabnak.ir/fa/rss/21",
-    "enabled": _env_bool("SOURCE_TABNAK_RSS_ENABLED", False),
-    "is_rss": True,
+        "link_selector": "section#box4 li.news div.desc h3 a",
+        "link_filter": lambda href: href.startswith("/news/"),
     },
-    
     {
-    "id": 5,
-    "name": "tasnim_rss",
-    "url": "https://www.tasnimnews.ir/fa/rss/feed/1/0/7/0/MostPupolar",
-    "enabled": _env_bool("SOURCE_TASNIM_Rss_ENABLED", False),
-    "is_rss": True,
+        "id": 4,
+        "name": "ana",
+        "url": "https://ana.ir/fa/archive",
+        "base_url": "https://ana.ir",
+        "enabled": _env_bool("SOURCE_ANA_ENABLED", True),
+
+        "link_selector": "div.linear_news a",
+        "link_filter": lambda href: href.startswith("/fa/news/"),
+    },
+    {
+        "id": 5,
+        "name": "mehr",
+        "url": "https://www.mehrnews.com/archive",
+        "base_url": "https://www.mehrnews.com",
+        "enabled": _env_bool("SOURCE_MEHR_ENABLED", True),
+
+        "link_selector": "li.news div.desc h3 a",
+        "link_filter": lambda href: href.startswith("/news/"),
+    },
+    {
+        "id": 6,
+        "name": "ilna",
+        "url": "https://www.ilna.ir/newsstudios/search",
+        "base_url": "https://www.ilna.ir",
+        "enabled": _env_bool("SOURCE_ILNA_ENABLED", True),
+
+        "link_selector": "li h2 a",
+        "link_filter": lambda href: href.startswith("/fa/news/"),
     },
 ]
 
