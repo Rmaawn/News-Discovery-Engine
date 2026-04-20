@@ -1,12 +1,12 @@
 import json
+import os
+import re
 from openai import OpenAI
-
 from database.db import SessionLocal
 from database.models import Article, AIProcessing
 from utils.logger import Logger
 from utils.retry import retry_on_error
 
-import os
 
 API_KEY = os.getenv("GAPGPT_API_KEY")
 BASE_URL = os.getenv("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
@@ -20,6 +20,8 @@ logger = Logger(module="ai_phase_3")
 
 client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
 
+def normalize_ai_content(text: str) -> str:
+    return re.sub(r"\s*🔹\s*", "\n🔹 ", text).strip()
 
 @retry_on_error(max_retries=8, logger=logger)
 def call_ai_for_rewrite(title: str, content: str) -> str:
@@ -133,7 +135,7 @@ def process_articles_with_ai(limit: int = 5):
                 parsed_data = json.loads(ai_result_str)
 
                 new_title = parsed_data.get("title")
-                new_content = parsed_data.get("content")
+                new_content = normalize_ai_content(parsed_data.get("content"))
 
                 if not new_title or not new_content:
                     raise ValueError(

@@ -44,7 +44,7 @@ def build_bale_caption(title: str, content: str, source_url: Optional[str] = Non
     return "\n".join(parts).strip()
 
 
-@retry_on_error(max_retries=8, logger=logger)
+@retry_on_error(max_retries=1, logger=logger)
 def send_message(
     chat_id: str,
     text: str,
@@ -70,7 +70,7 @@ def send_message(
     return data
 
 
-@retry_on_error(max_retries=8, logger=logger)
+@retry_on_error(max_retries=1, logger=logger)
 def send_photo(
     chat_id: str,
     photo: str,
