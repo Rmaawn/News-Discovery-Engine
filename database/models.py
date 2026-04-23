@@ -1,3 +1,4 @@
+# models.py
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -10,7 +11,7 @@ class Source(Base):
     __tablename__ = "sources"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String)
+    name = Column(String, unique=True)
     base_url = Column(String)
     language = Column(String)
     country = Column(String)
@@ -57,7 +58,7 @@ class Article(Base):
 
     image_url = Column(String)
 
-    content_hash = Column(String)
+    content_hash = Column(String, index=True)
     word_count = Column(Integer)
 
     created_at = Column(DateTime, default=func.now())
@@ -71,17 +72,13 @@ class AIProcessing(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # خبر اصلی که این بازنویسی مربوط به آن است
     article_id = Column(Integer, ForeignKey("articles.id"))
 
-    # خروجی فاز سوم: عنوان بازنویسی‌شده و متن بازنویسی‌شده
     rewritten_title = Column(Text)
     rewritten_content = Column(Text)
 
     created_at = Column(DateTime, default=func.now())
 
-    # (اختیاری ولی مفید برای آینده: رابطه با Article)
-    # اگر نخواستی، می‌تونی این خط رو حذف کنی
     article = relationship("Article")
 
 
@@ -100,7 +97,6 @@ class PublishLog(Base):
         UniqueConstraint("article_id", "platform", name="uq_publish_article_platform"),
         Index("ix_publish_platform_status_article", "platform", "status", "article_id"),
     )
-
 
 
 class SystemLog(Base):

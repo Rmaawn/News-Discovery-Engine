@@ -1,0 +1,719 @@
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_ai\health_rewrite.py
+==============================
+import json
+import os
+import re
+
+from openai import OpenAI
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing, Source
+
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+
+API_KEY = os.getenv("GAPGPT_API_KEY")
+BASE_URL = os.getenv("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
+MODEL_NAME = os.getenv("GAPGPT_MODEL", "gpt-4o-mini")
+
+if not API_KEY:
+    raise RuntimeError("Missing env: GAPGPT_API_KEY")
+
+logger = Logger(module="health_ai_phase_3")
+
+client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+
+SOURCE_NAME = "yjc_health"
+
+
+def normalize_ai_content(text: str) -> str:
+    text = re.sub(r"\s*🔹\s*", "\n🔹 ", text).strip()
+    text = re.sub(r"(#\S+)\s+(?=#)", r"\1\n", text)
+    return text
+
+
+@retry_on_error(max_retries=8, logger=logger)
+def call_ai_for_rewrite(title: str, content: str) -> str:
+    system_prompt = """
+    شما یک خبرنگار و ویراستار حرفه‌ای هستید.
+    وظیفه شما بازنویسی عنوان و خلاصه سازی متن خبر است تا جذاب‌تر، روان‌تر و کاملاً غیرتکراری (یونیک) شود.
+
+    قوانین:
+    - متن بین 70 تا 150 کاراکتر
+    - چند خط کوتاه
+    - هر خط با 🔹
+    - بدون ذکر منبع
+    - در انتها 1 یا 2 هشتگ
+
+    خروجی فقط JSON:
+    {
+        "title": "...",
+        "content": "..."
+    }
+    """
+
+    user_prompt = f"عنوان:\n{title}\n\nمتن:\n{content}"
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7,
+        response_format={"type": "json_object"}
+    )
+
+    return response.choices[0].message.content
+
+
+def get_health_source(session):
+    return session.query(Source).filter_by(name=SOURCE_NAME).first()
+
+
+def process_health_articles(limit: int = 5):
+    session = SessionLocal()
+
+    try:
+        source = get_health_source(session)
+
+        if not source:
+            logger.error("Health source not found")
+            return
+
+        articles = (
+            session.query(Article)
+            .outerjoin(AIProcessing, AIProcessing.article_id == Article.id)
+            .filter(AIProcessing.id == None)
+            .filter(Article.source_id == source.id)  # 👈 مهم
+            .limit(limit)
+            .all()
+        )
+
+        if not articles:
+            logger.info("No health articles to process")
+            return
+
+        for article in articles:
+            logger.info(f"[HEALTH AI] Processing Article {article.id}")
+
+            if not article.clean_text:
+                logger.warning(f"Empty content for {article.id}")
+                continue
+
+            try:
+                ai_result = call_ai_for_rewrite(
+                    article.title or "",
+                    article.clean_text
+                )
+            except Exception as e:
+                logger.error(f"AI failed for {article.id}: {str(e)}")
+                continue
+
+            try:
+                parsed = json.loads(ai_result)
+
+                new_title = parsed.get("title")
+                new_content = normalize_ai_content(parsed.get("content"))
+
+                if not new_title or not new_content:
+                    raise ValueError("Invalid AI output")
+
+                record = AIProcessing(
+                    article_id=article.id,
+                    rewritten_title=new_title,
+                    rewritten_content=new_content,
+                )
+
+                session.add(record)
+                session.commit()
+
+                logger.success(f"[HEALTH AI] Done {article.id}")
+
+            except Exception as e:
+                logger.error(f"Parse error {article.id}: {str(e)}")
+                session.rollback()
+
+    finally:
+        session.close()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_discovery\health_crawler.py
+==============================
+import requests
+import xml.etree.ElementTree as ET
+
+from database.db import SessionLocal
+from database.models import Source, Link
+from utils.logger import Logger
+
+logger = Logger(module="health_crawler")
+
+RSS_URL = "https://www.yjc.ir/fa/rss/7/57"
+SOURCE_NAME = "yjc_health"
+
+
+def get_or_create_source(db):
+    source = db.query(Source).filter_by(name=SOURCE_NAME).first()
+    if not source:
+        logger.info("Creating new source: yjc_health")
+        source = Source(
+            name=SOURCE_NAME,
+            base_url="https://www.yjc.ir",
+            language="fa",
+            country="ir",
+        )
+        db.add(source)
+        db.commit()
+        db.refresh(source)
+    return source
+
+
+def get_latest_links():
+    """برمی‌گردونه: [{'url': '...', 'image_url': '...'}, ...]"""
+    logger.info("Fetching RSS...")
+
+    try:
+        res = requests.get(RSS_URL, timeout=10)
+        logger.info(f"RSS status: {res.status_code}")
+
+        if res.status_code != 200:
+            logger.error(f"RSS fetch failed: {res.status_code}")
+            return []
+
+        root = ET.fromstring(res.content)
+        items = root.findall(".//item")
+
+        if not items:
+            logger.error("No items found in RSS")
+            return []
+
+        results = []
+        for item in items:
+            link_tag = item.find("link")
+            if link_tag is None or not link_tag.text:
+                continue
+
+            url = link_tag.text.strip()
+
+            # ✅ استخراج تصویر از enclosure
+            image_url = None
+            enclosure = item.find("enclosure")
+            if enclosure is not None and enclosure.get("url"):
+                image_url = enclosure.get("url")
+
+            results.append({"url": url, "image_url": image_url})
+
+        logger.success(f"Extracted {len(results)} links from RSS")
+        return results
+
+    except Exception as e:
+        logger.error(f"RSS parsing error: {str(e)}")
+        return []
+
+
+def run_crawler(limit=10):
+    """ذخیره لینک‌ها و برگرداندن mapping url->image"""
+    db = SessionLocal()
+    source = get_or_create_source(db)
+    rss_items = get_latest_links()
+
+    if not rss_items:
+        logger.error("No links extracted from RSS")
+        db.close()
+        return {}
+
+    url_to_image = {}  # ✅ نگه‌داری موقت
+    saved = 0
+
+    for item in rss_items:
+        if saved >= limit:
+            break
+
+        url = item["url"]
+        image_url = item.get("image_url")
+
+        exists = db.query(Link).filter_by(url=url).first()
+        if exists:
+            logger.warning(f"Already exists: {url}")
+            continue
+
+        link = Link(
+            source_id=source.id,
+            url=url,
+            status="new",
+        )
+        db.add(link)
+        db.commit()
+
+        url_to_image[url] = image_url  # ✅ ذخیره در حافظه
+        saved += 1
+        logger.success(f"Saved: {url}")
+        if image_url:
+            logger.info(f"  Image: {image_url}")
+
+    logger.info(f"Crawler done. Saved {saved} new links.")
+    db.close()
+    return url_to_image
+
+
+if __name__ == "__main__":
+    run_crawler()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_discovery\health_sources.py
+==============================
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_publisher\health_publisher.py
+==============================
+from typing import List, Tuple
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+
+from database.db import SessionLocal
+from database.models import Article, AIProcessing, PublishLog, Link, Source
+
+from utils.logger import Logger
+
+from publisher.bale import send_article_to_bale
+from publisher.rubika import send_article_to_rubika
+from publisher.eitaa import send_article_to_eitaa
+
+import os
+
+logger = Logger(module="health_publisher")
+
+SOURCE_NAME = "yjc_health"
+HOURLY_LIMIT = 6
+
+BALE_HEALTH_ID = os.getenv("BALE_HEALTH_ID")
+EITAA_HEALTH_ID = os.getenv("EITAA_HEALTH_ID")
+RUBIKA_HEALTH_ID = os.getenv("RUBIKA_HEALTH_ID")
+
+PLATFORMS = {
+    "bale": (send_article_to_bale, BALE_HEALTH_ID),
+    "rubika": (send_article_to_rubika, RUBIKA_HEALTH_ID),
+    "eitaa": (send_article_to_eitaa, EITAA_HEALTH_ID),
+}
+
+
+def get_health_source(session):
+    return session.query(Source).filter_by(name=SOURCE_NAME).first()
+
+
+def get_published_count_last_hour(session, platform: str) -> int:
+    cutoff = datetime.now() - timedelta(hours=1)
+    return (
+        session.query(PublishLog)
+        .filter(PublishLog.platform == f"{platform}_health")
+        .filter(PublishLog.status == "success")
+        .filter(PublishLog.created_at >= cutoff)
+        .count()
+    )
+
+
+def get_health_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
+    session = SessionLocal()
+    try:
+        source = get_health_source(session)
+
+        if not source:
+            logger.error("Health source not found")
+            return []
+
+        existing = (
+            select(PublishLog.article_id)
+            .where(PublishLog.platform == f"{platform}_health")
+        )
+
+        results = (
+            session.query(Article, AIProcessing, Link)
+            .join(AIProcessing, AIProcessing.article_id == Article.id)
+            .join(Link, Link.id == Article.link_id)
+            .filter(Article.source_id == source.id)
+            .filter(~Article.id.in_(existing))
+            # ❗ مهم: حذف فیلتر image_url
+            .order_by(Article.id.asc())
+            .limit(limit)
+            .all()
+        )
+
+        logger.info(f"[HEALTH] Found {len(results)} articles for {platform}")
+
+        return results
+
+    finally:
+        session.close()
+
+
+def publish_health(platform: str = "bale", limit: int = 1) -> int:
+    if platform not in PLATFORMS:
+        logger.error(f"Unknown platform: {platform}")
+        return 0
+
+    send_func, chat_id = PLATFORMS[platform]
+
+    if not chat_id:
+        logger.error(f"Missing chat_id for {platform}")
+        return 0
+
+    logger.info(f"[HEALTH] Publishing → platform={platform}, chat_id={chat_id}")
+
+    session = SessionLocal()
+    success_count = 0
+
+    try:
+        items = get_health_articles(limit=limit, platform=platform)
+
+        if not items:
+            logger.info(f"No health articles for {platform}")
+            return 0
+
+        for article, ai_proc, link in items:
+
+            if get_published_count_last_hour(session, platform) >= HOURLY_LIMIT:
+                logger.info(f"Hourly limit reached for {platform}")
+                break
+
+            # reserve
+            try:
+                log = PublishLog(
+                    article_id=article.id,
+                    platform=f"{platform}_health",
+                    status="pending",
+                )
+                session.add(log)
+                session.commit()
+
+            except IntegrityError:
+                session.rollback()
+                logger.warning(f"Duplicate prevented {article.id}")
+                continue
+
+            # send
+            try:
+                send_func(
+                    title=ai_proc.rewritten_title or article.title,
+                    content=ai_proc.rewritten_content,
+                    image_url=article.image_url,
+                    source_url=link.url if link else None,
+                    chat_id=chat_id
+                )
+
+                log.status = "success"
+                session.commit()
+
+                success_count += 1
+                logger.success(f"[HEALTH] Published {article.id} on {platform}")
+
+            except Exception as e:
+                session.rollback()
+
+                try:
+                    log.status = "failed"
+                    session.commit()
+                except:
+                    session.rollback()
+
+                logger.error(f"Failed {article.id} on {platform}: {e}")
+
+    finally:
+        session.close()
+
+    return success_count
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_run.py
+==============================
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+from health_discovery.health_crawler import run_crawler
+from health_scraper.health_fetcher import run_scraper
+from health_ai.health_rewrite import process_health_articles
+from health_publisher.health_publisher import publish_health
+
+from utils.logger import Logger
+
+logger = Logger(module="health_full_run")
+
+
+def run():
+    logger.info("=== HEALTH PIPELINE START ===")
+
+    url_to_image = run_crawler(limit=1) 
+    run_scraper(url_to_image)
+    process_health_articles(limit=1)
+
+    for p in ["bale", "rubika", "eitaa"]:
+        publish_health(platform=p, limit=1)
+
+    logger.success("=== HEALTH PIPELINE DONE ===")
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_run_01_crawler.py
+==============================
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+from health_discovery.health_crawler import run_crawler
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+LIMIT = 1
+
+logger = Logger(module="health_crawler_phase_1")
+
+
+@retry_on_error(max_retries=5)
+def run():
+    logger.info(f"[HEALTH] Starting crawler... (Limit: {LIMIT})")
+    run_crawler(limit=LIMIT)
+    logger.success("[HEALTH] Crawler finished successfully")
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_run_02_scraper.py
+==============================
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+from health_scraper.health_fetcher import run_scraper
+from utils.logger import Logger
+from utils.retry import retry_on_error
+
+FETCH_LIMIT = 1
+
+logger = Logger(module="health_scraper_phase_2")
+
+
+@retry_on_error(max_retries=5)
+def run():
+    logger.info(f"[HEALTH] Starting scraper... (Limit: {FETCH_LIMIT})")
+    run_scraper({})
+    logger.success("[HEALTH] Scraper finished successfully")
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_run_03_ai.py
+==============================
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+from health_ai.health_rewrite import process_health_articles
+from utils.logger import Logger
+
+LIMIT = 1
+
+logger = Logger(module="health_ai_phase_3")
+
+
+def run():
+    logger.info(f"[HEALTH] Starting AI... (Limit: {LIMIT})")
+    process_health_articles(limit=LIMIT)
+    logger.success("[HEALTH] AI finished")
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_run_04_publisher.py
+==============================
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(".env")
+
+from health_publisher.health_publisher import publish_health
+from utils.logger import Logger
+
+PLATFORMS = ["bale", "rubika", "eitaa"]
+LIMIT = 1
+
+logger = Logger(module="health_run_publisher")
+
+
+def run():
+    logger.info("[HEALTH] Starting publisher...")
+
+    total = 0
+
+    for p in PLATFORMS:
+        logger.info(f"[HEALTH] Publishing to {p}")
+        total += publish_health(platform=p, limit=LIMIT)
+
+    logger.success(f"[HEALTH] Done. Total: {total}")
+
+
+if __name__ == "__main__":
+    run()
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_scraper\health_fetcher.py
+==============================
+import hashlib
+import requests
+
+from database.db import SessionLocal
+from database.models import Link, Article
+from health_scraper.health_parsers import parse_yjc_health
+from utils.logger import Logger
+
+logger = Logger(module="health_fetcher")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+
+def hash_content(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def run_scraper(url_to_image: dict):
+    db = SessionLocal()
+    links = db.query(Link).filter_by(status="new").all()
+
+    if not links:
+        logger.warning("No new links")
+        db.close()
+        return
+
+    logger.info(f"{len(links)} links to scrape")
+
+    for link in links:
+        try:
+            logger.info(f"Fetching: {link.url}")
+
+            res = requests.get(link.url, headers=HEADERS, timeout=15)
+
+            if res.status_code != 200:
+                logger.error(f"HTTP {res.status_code}")
+                link.status = "failed"
+                db.commit()
+                continue
+
+            parsed = parse_yjc_health(res.text)
+
+            if not parsed:
+                logger.error("Parser failed")
+                link.status = "failed"
+                db.commit()
+                continue
+
+            title = parsed.get("title")
+            clean_text = parsed.get("clean_text")  # ✅ درست
+
+            if not title or not clean_text:
+                logger.error("Missing title/content")
+                link.status = "failed"
+                db.commit()
+                continue
+
+            content_hash = hash_content(clean_text)
+
+            duplicate = db.query(Article).filter_by(content_hash=content_hash).first()
+            if duplicate:
+                logger.warning("Duplicate")
+                link.status = "duplicate"
+                db.commit()
+                continue
+
+            image_url = url_to_image.get(link.url)
+
+            article = Article(
+                link_id=link.id,
+                title=title,
+                clean_text=clean_text,
+                image_url=image_url,
+                content_hash=content_hash,
+            )
+
+            db.add(article)
+            link.status = "scraped"
+            db.commit()
+
+            logger.success(f"Saved: {title[:60]}")
+            if image_url:
+                logger.info(f"  Image: {image_url}")
+
+        except Exception as e:
+            logger.error(f"Error: {str(e)}")
+            link.status = "failed"
+            db.commit()
+
+    db.close()
+    logger.info("Scraper done")
+
+
+if __name__ == "__main__":
+    run_scraper({})
+
+==============================
+FILE: C:\Users\arman\Desktop\News Discovery Engine\health_engine\health_scraper\health_parsers.py
+==============================
+from bs4 import BeautifulSoup
+
+
+def parse_yjc_health(html):
+    soup = BeautifulSoup(html, "html.parser")
+
+    # title
+    title_tag = soup.select_one("span.title-news")
+    title = title_tag.get_text(strip=True) if title_tag else None
+
+    # content
+    content_div = soup.select_one("div.row.baznashr-body")
+
+    paragraphs = []
+    if content_div:
+        for p in content_div.find_all("p"):
+            text = p.get_text(strip=True)
+            if text:
+                paragraphs.append(text)
+
+    clean_text = "\n".join(paragraphs)
+
+    return {
+        "title": title,
+        "clean_text": clean_text,
+    }
+

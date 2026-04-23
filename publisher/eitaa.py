@@ -17,10 +17,11 @@ if not EITAA_TOKEN:
 BASE_URL = f"https://eitaayar.ir/api/{EITAA_TOKEN}"
 
 TITLE_PREFIX = ""
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+# FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+EITAA_FOOTER_TEXT_NEWS = os.getenv("EITAA_FOOTER_TEXT_NEWS", "")
+EITAA_FOOTER_TEXT_HEALTH = os.getenv("EITAA_FOOTER_TEXT_HEALTH", "")
 
-
-def build_caption(title: str, content: str) -> str:
+def build_caption(title: str, content: str, is_health: bool = False) -> str:
     parts = []
 
     if TITLE_PREFIX:
@@ -32,7 +33,9 @@ def build_caption(title: str, content: str) -> str:
     if content:
         parts.append(content.strip())
 
-    parts.append("\n\n" + FOOTER_TEXT)
+    footer = EITAA_FOOTER_TEXT_HEALTH if is_health else EITAA_FOOTER_TEXT_NEWS
+    if footer:
+        parts.append("\n\n" + footer)
 
     return "\n".join(parts).strip()
 
@@ -103,9 +106,10 @@ def send_article_to_eitaa(
     image_url: Optional[str] = None,
     source_url: Optional[str] = None,
     chat_id: str = EITAA_CHAT_ID,
+    is_health: bool = False,
 ) -> Dict[str, Any]:
 
-    text = build_caption(title, content)
+    text = build_caption(title, content, is_health=is_health)
 
     if image_url:
         logger.info("Sending article with image to Eitaa...")

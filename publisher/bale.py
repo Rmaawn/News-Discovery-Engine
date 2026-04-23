@@ -24,10 +24,11 @@ SEND_PHOTO_ENDPOINT = f"{BALE_BASE_URL}/sendPhoto"
 # ============================================
 
 TITLE_PREFIX = ""
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+# FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+BALE_FOOTER_TEXT_NEWS = os.getenv("BALE_FOOTER_TEXT_NEWS", "")
+BALE_FOOTER_TEXT_HEALTH = os.getenv("BALE_FOOTER_TEXT_HEALTH", "")
 
-
-def build_bale_caption(title: str, content: str, source_url: Optional[str] = None) -> str:
+def build_bale_caption(title: str, content: str,is_health: bool = False, source_url: Optional[str] = None) -> str:
     """ساخت caption برای ارسال با تصویر"""
     parts = []
 
@@ -39,7 +40,9 @@ def build_bale_caption(title: str, content: str, source_url: Optional[str] = Non
     if content:
         parts.append(content.strip())
 
-    parts.append("\n\n" + FOOTER_TEXT)
+    footer = BALE_FOOTER_TEXT_HEALTH if is_health else BALE_FOOTER_TEXT_NEWS
+    if footer:
+        parts.append("\n\n" + footer)
 
     return "\n".join(parts).strip()
 
@@ -104,10 +107,11 @@ def send_article_to_bale(
     image_url: Optional[str] = None,
     source_url: Optional[str] = None,
     chat_id: str = BALE_CHANNEL_ID,
+    is_health: bool = False,
 ) -> Dict[str, Any]:
     """ارسال خبر به بله (با یا بدون تصویر)"""
     
-    caption = build_bale_caption(title, content, source_url=source_url)
+    caption = build_bale_caption(title, content,is_health=is_health, source_url=source_url)
     
     if image_url:
         logger.info(f"Sending article with image to Bale channel: {chat_id}")

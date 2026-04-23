@@ -17,10 +17,11 @@ if not RUBIKA_TOKEN:
 RUBIKA_BASE_URL = "https://botapi.rubika.ir/v3"
 
 TITLE_PREFIX = ""
-FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+# FOOTER_TEXT = "🔴 تادنانیوز مرجع رسمی مهمترین اخبار ایران و جهان\n@tadnanews"
+RUBIKA_FOOTER_TEXT_NEWS = os.getenv("RUBIKA_FOOTER_TEXT_NEWS", "")
+RUBIKA_FOOTER_TEXT_HEALTH = os.getenv("RUBIKA_FOOTER_TEXT_HEALTH", "")
 
-
-def build_caption(title: str, content: str) -> str:
+def build_caption(title: str, content: str, is_health: bool = False) -> str:
     parts = []
     if TITLE_PREFIX:
         parts.append(TITLE_PREFIX)
@@ -28,7 +29,9 @@ def build_caption(title: str, content: str) -> str:
         parts.append(f"🔴 {title}\n")
     if content:
         parts.append(content.strip())
-    parts.append("\n\n" + FOOTER_TEXT)
+    footer = RUBIKA_FOOTER_TEXT_HEALTH if is_health else RUBIKA_FOOTER_TEXT_NEWS
+    if footer:
+        parts.append("\n\n" + footer)
     return "\n".join(parts).strip()
 
 
@@ -152,13 +155,15 @@ def send_article_to_rubika(
     content: str,
     image_url: Optional[str] = None,
     source_url: Optional[str] = None,
+    chat_id: str = RUBIKA_CHAT_ID,
+    is_health: bool = False,
     **kwargs
 ) -> Dict[str, Any]:
-    text = build_caption(title, content)
+    text = build_caption(title, content, is_health=is_health)
 
     if not image_url:
         logger.info("No image_url. Sending text-only message to Rubika.")
-        return send_message_rubika(text=text)
+        return send_message_rubika(text=text, chat_id=chat_id)
 
     logger.info(f"Rubika image flow started. image_url={image_url}")
     image_bytes = download_image_bytes(image_url)
@@ -167,7 +172,7 @@ def send_article_to_rubika(
 
     try:
         # فقط یک بار
-        return send_file_rubika_once(file_id=file_id, text=text)
+        return send_file_rubika_once(file_id=file_id, text=text, chat_id=chat_id)
 
     except requests.Timeout as e:
         # وضعیت نامشخص است؛ fallback ممنوع برای جلوگیری از duplicate
@@ -182,7 +187,7 @@ def send_article_to_rubika(
             raise
         # خطای قطعی (4xx): می‌توان fallback متن زد
         logger.warning(f"sendFile deterministic HTTP error ({status}). fallback to text.")
-        return send_message_rubika(text=text)
+        return send_message_rubika(text=text, chat_id=chat_id)
 
     except Exception as e:
         # خطاهای مبهم: fallback نزن
