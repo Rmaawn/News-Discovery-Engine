@@ -42,6 +42,7 @@ def get_unpublished_ai_articles(limit: int, platform: str) -> List[Tuple[Article
         results = (
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
+            .filter(Article.source_id != 999)
             .join(Link, Link.id == Article.link_id)
             .filter(~Article.id.in_(existing_select))
             .filter(Article.image_url.isnot(None))  # فقط خبر تصویردار
@@ -119,7 +120,7 @@ def publish(platform: str = "bale", limit: int = 10) -> int:
                 publish_log.status = "success"
                 session.commit()
                 success_count += 1
-                logger.success(f"Article {article.id} published on {platform}.")
+                logger.success(f"Article {article.id}| source_id={article.source_id} | platform={platform} | published on {platform}.")
 
             except Exception as e:
                 session.rollback()

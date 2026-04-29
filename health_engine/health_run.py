@@ -20,7 +20,7 @@ def run():
     logger.info("=== HEALTH PIPELINE START ===")
 
     url_to_image = run_crawler(limit=1) 
-    run_scraper(url_to_image)
+    run_scraper()
     process_health_articles(limit=1)
 
     for p in ["bale", "rubika", "eitaa"]:

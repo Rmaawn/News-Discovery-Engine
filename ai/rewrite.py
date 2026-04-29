@@ -81,18 +81,16 @@ def call_ai_for_rewrite(title: str, content: str) -> str:
 
 
 def process_articles_with_ai(limit: int = 5):
-    """
-    پردازش اخباری که هنوز رکوردی در AIProcessing ندارند
-    و ذخیره نسخه بازنویسی‌شده در جدول ai_processing.
-    """
     session = SessionLocal()
-
     try:
-        # تمام Articleهایی که هنوز برایشان پردازش AI ثبت نشده
+        processed_ids = session.query(AIProcessing.article_id).all()
+        processed_ids = [x[0] for x in processed_ids]
+
         unprocessed_articles = (
             session.query(Article)
-            .outerjoin(AIProcessing, AIProcessing.article_id == Article.id)
-            .filter(AIProcessing.id == None)  # noqa: E711
+            .filter(Article.source_id != 999)  # ✅ حذف HEALTH
+            .filter(~Article.id.in_(processed_ids))
+            .order_by(Article.id.asc())
             .limit(limit)
             .all()
         )

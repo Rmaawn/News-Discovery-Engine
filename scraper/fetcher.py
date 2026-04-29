@@ -79,7 +79,7 @@ def fetch_article(link_id, url, source_id):
 
         link.status = "fetched"
         db.commit()
-        logger.success(f"Fetched article: {title[:60]}")
+        logger.success(f"Fetched article: {title[:60]} | source_id={source_id} ")
         return True
 
     except Exception as e:
@@ -108,6 +108,7 @@ def process_new_links(limit=10, max_retries=3, retry_cooldown_minutes=30):
         links = (
             db.query(Link)
             .filter(
+                Link.source_id != 999, 
                 or_(
                     Link.status == "new",
                     and_(

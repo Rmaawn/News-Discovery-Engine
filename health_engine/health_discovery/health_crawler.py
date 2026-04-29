@@ -1,5 +1,6 @@
 import requests
-import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 from database.db import SessionLocal
 from database.models import Source, Link
@@ -7,112 +8,96 @@ from utils.logger import Logger
 
 logger = Logger(module="health_crawler")
 
-RSS_URL = "https://www.yjc.ir/fa/rss/7/57"
-SOURCE_NAME = "yjc_health"
+SOURCE_ID = 999
+SOURCE_NAME = "mehr_health"
+BASE_URL = "https://www.mehrnews.com"
+HEALTH_URL = "https://www.mehrnews.com/service/health/"
 
 
 def get_or_create_source(db):
-    source = db.query(Source).filter_by(name=SOURCE_NAME).first()
+    source = db.query(Source).filter_by(id=SOURCE_ID).first()
+    
     if not source:
-        logger.info("Creating new source: yjc_health")
+        logger.info(f"Creating source: {SOURCE_NAME}")
         source = Source(
+            id=SOURCE_ID,
             name=SOURCE_NAME,
-            base_url="https://www.yjc.ir",
+            base_url=BASE_URL,
             language="fa",
             country="ir",
+            is_active=True
         )
         db.add(source)
         db.commit()
-        db.refresh(source)
+    
     return source
 
 
 def get_latest_links():
-    """برمی‌گردونه: [{'url': '...', 'image_url': '...'}, ...]"""
-    logger.info("Fetching RSS...")
-
+    logger.info("Fetching Mehr health page...")
+    
     try:
-        res = requests.get(RSS_URL, timeout=10)
-        logger.info(f"RSS status: {res.status_code}")
-
+        res = requests.get(HEALTH_URL, timeout=15)
+        
         if res.status_code != 200:
-            logger.error(f"RSS fetch failed: {res.status_code}")
+            logger.error(f"HTTP {res.status_code}")
             return []
-
-        root = ET.fromstring(res.content)
-        items = root.findall(".//item")
-
+        
+        soup = BeautifulSoup(res.text, "html.parser")
+        items = soup.select("section#box88 li.news h3 a")
+        
         if not items:
-            logger.error("No items found in RSS")
+            logger.error("No items found")
             return []
-
+        
         results = []
-        for item in items:
-            link_tag = item.find("link")
-            if link_tag is None or not link_tag.text:
-                continue
-
-            url = link_tag.text.strip()
-
-            # ✅ استخراج تصویر از enclosure
-            image_url = None
-            enclosure = item.find("enclosure")
-            if enclosure is not None and enclosure.get("url"):
-                image_url = enclosure.get("url")
-
-            results.append({"url": url, "image_url": image_url})
-
-        logger.success(f"Extracted {len(results)} links from RSS")
+        for a in items:
+            href = a.get("href")
+            if href:
+                full_url = urljoin(BASE_URL, href)
+                results.append(full_url)
+        
+        logger.success(f"Found {len(results)} links")
         return results
-
+    
     except Exception as e:
-        logger.error(f"RSS parsing error: {str(e)}")
+        logger.error(f"Error: {e}")
         return []
 
 
 def run_crawler(limit=10):
-    """ذخیره لینک‌ها و برگرداندن mapping url->image"""
     db = SessionLocal()
     source = get_or_create_source(db)
-    rss_items = get_latest_links()
-
-    if not rss_items:
-        logger.error("No links extracted from RSS")
+    urls = get_latest_links()
+    
+    if not urls:
+        logger.error("No links")
         db.close()
-        return {}
-
-    url_to_image = {}  # ✅ نگه‌داری موقت
+        return
+    
     saved = 0
-
-    for item in rss_items:
+    
+    for url in urls:
         if saved >= limit:
             break
-
-        url = item["url"]
-        image_url = item.get("image_url")
-
+        
         exists = db.query(Link).filter_by(url=url).first()
         if exists:
-            logger.warning(f"Already exists: {url}")
             continue
-
+        
         link = Link(
-            source_id=source.id,
+            source_id=SOURCE_ID,
             url=url,
-            status="new",
+            status="new"
         )
         db.add(link)
         db.commit()
-
-        url_to_image[url] = image_url  # ✅ ذخیره در حافظه
+        
         saved += 1
         logger.success(f"Saved: {url}")
-        if image_url:
-            logger.info(f"  Image: {image_url}")
-
-    logger.info(f"Crawler done. Saved {saved} new links.")
+    
+    logger.info(f"Crawler done. Saved {saved}")
     db.close()
-    return url_to_image
 
 
 if __name__ == "__main__":

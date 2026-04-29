@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from database.db import SessionLocal
 from database.models import Article, AIProcessing, PublishLog, Link, Source
 
+from health_engine.health_discovery.health_crawler import SOURCE_ID
 from utils.logger import Logger
 
 from publisher.bale import send_article_to_bale
@@ -17,7 +18,8 @@ import os
 
 logger = Logger(module="health_publisher")
 
-SOURCE_NAME = "yjc_health"
+SOURCE_NAME = "mehr_health"
+# SOURCE_ID = 999
 HOURLY_LIMIT = 6
 
 BALE_HEALTH_ID = os.getenv("BALE_HEALTH_ID")
@@ -46,16 +48,10 @@ def get_published_count_last_hour(session, platform: str) -> int:
     )
 
 
-def get_health_articles(limit: int, platform: str) -> List[Tuple[Article, AIProcessing, Link]]:
+def get_health_articles(limit: int, platform: str):
     session = SessionLocal()
     try:
-        source = get_health_source(session)
-
-        if not source:
-            logger.error("Health source not found")
-            return []
-
-        existing = (
+        existing_select = (
             select(PublishLog.article_id)
             .where(PublishLog.platform == f"{platform}_health")
         )
@@ -64,18 +60,14 @@ def get_health_articles(limit: int, platform: str) -> List[Tuple[Article, AIProc
             session.query(Article, AIProcessing, Link)
             .join(AIProcessing, AIProcessing.article_id == Article.id)
             .join(Link, Link.id == Article.link_id)
-            .filter(Article.source_id == source.id)
-            .filter(~Article.id.in_(existing))
-            # ❗ مهم: حذف فیلتر image_url
+            .filter(Article.source_id == SOURCE_ID) 
+            .filter(~Article.id.in_(existing_select))
+            .filter(Article.image_url.isnot(None))
             .order_by(Article.id.asc())
             .limit(limit)
             .all()
         )
-
-        logger.info(f"[HEALTH] Found {len(results)} articles for {platform}")
-
         return results
-
     finally:
         session.close()
 
