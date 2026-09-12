@@ -1,4 +1,6 @@
 {
+  "platform": "python",
+  "port": 3000,
   "disks": [
     {
       "name": "news",

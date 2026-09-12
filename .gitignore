@@ -17,6 +17,7 @@ ENV/
 # IDE / Editor
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -36,3 +37,7 @@ news.db
 
 # Misc
 .cache/
+
+# SQLite WAL sidecar files
+*-wal
+*-shm

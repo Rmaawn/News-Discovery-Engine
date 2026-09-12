@@ -1,0 +1,521 @@
+/* ==========================================================================
+   News Discovery Engine — Dashboard
+   طراحی مدرن، RTL، دارک/لایت مود، فونت فارسی Vazirmatn
+   ========================================================================== */
+
+/* ---------- فونت فارسی (Vazirmatn — Local / Self-hosted) ---------- */
+@font-face {
+    font-family: "Vazirmatn";
+    src: url("../fonts/Vazirmatn-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Vazirmatn";
+    src: url("../fonts/Vazirmatn-Medium.woff2") format("woff2");
+    font-weight: 500;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Vazirmatn";
+    src: url("../fonts/Vazirmatn-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-display: swap;
+}
+
+/* ---------- متغیرهای طراحی (Design Tokens) ---------- */
+:root {
+    --font: "Vazirmatn", "Segoe UI", Tahoma, sans-serif;
+
+    --accent: #4f46e5;
+    --accent-soft: rgba(79, 70, 229, 0.12);
+    --accent-2: #7c3aed;
+
+    --success: #10b981;
+    --success-soft: rgba(16, 185, 129, 0.14);
+    --warning: #f59e0b;
+    --warning-soft: rgba(245, 158, 11, 0.14);
+    --danger: #ef4444;
+    --danger-soft: rgba(239, 68, 68, 0.14);
+    --info: #3b82f6;
+    --info-soft: rgba(59, 130, 246, 0.14);
+
+    --radius: 16px;
+    --radius-sm: 10px;
+    --shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.06);
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+    --sidebar-w: 264px;
+    --transition: 0.2s ease;
+}
+
+/* Light theme (default) */
+:root, :root[data-theme="light"] {
+    --bg: #f4f5fb;
+    --surface: #ffffff;
+    --surface-2: #f8f9fc;
+    --text: #1a1d29;
+    --text-2: #4b5162;
+    --muted: #838a9c;
+    --border: #e8eaf1;
+    --sidebar-bg: #ffffff;
+    --topbar-bg: rgba(255, 255, 255, 0.85);
+    --hover: #f2f3f9;
+}
+
+/* Dark theme */
+:root[data-theme="dark"] {
+    --bg: #0d0f16;
+    --surface: #161923;
+    --surface-2: #1d212e;
+    --text: #e8eaf1;
+    --text-2: #b3b9c8;
+    --muted: #7a8194;
+    --border: #262b3a;
+    --sidebar-bg: #12141d;
+    --topbar-bg: rgba(18, 20, 29, 0.85);
+    --hover: #1e2230;
+    --accent-soft: rgba(99, 102, 241, 0.18);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    transition: background var(--transition), color var(--transition);
+}
+
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--accent-soft); }
+
+/* اسکرول‌بار */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ==========================================================================
+   لِی‌اوت اصلی
+   ========================================================================== */
+.layout { display: flex; min-height: 100vh; }
+
+/* ---------- سایدبار ---------- */
+.sidebar {
+    width: var(--sidebar-w);
+    background: var(--sidebar-bg);
+    border-inline-start: 1px solid var(--border);
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 40;
+    transition: transform var(--transition);
+}
+
+.sidebar__brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 22px 22px;
+    border-bottom: 1px solid var(--border);
+}
+.sidebar__logo {
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; flex-shrink: 0;
+    box-shadow: 0 6px 16px var(--accent-soft);
+}
+.sidebar__logo svg { width: 22px; height: 22px; }
+.sidebar__title { font-weight: 700; font-size: 15px; line-height: 1.3; }
+.sidebar__subtitle { font-size: 11px; color: var(--muted); }
+
+.sidebar__nav { padding: 16px 12px; overflow-y: auto; flex: 1; }
+.sidebar__section-label {
+    font-size: 11px; color: var(--muted);
+    padding: 12px 12px 8px; font-weight: 500;
+}
+.nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 14px; border-radius: var(--radius-sm);
+    color: var(--text-2); font-size: 14px; font-weight: 500;
+    transition: var(--transition); margin-bottom: 3px; cursor: pointer;
+}
+.nav-item svg { width: 20px; height: 20px; flex-shrink: 0; opacity: 0.85; }
+.nav-item:hover { background: var(--hover); color: var(--text); }
+.nav-item.active {
+    background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+:root[data-theme="dark"] .nav-item.active { color: #a5b4fc; }
+
+.sidebar__footer { padding: 14px 16px; border-top: 1px solid var(--border); }
+
+/* ---------- محتوای اصلی ---------- */
+.main {
+    flex: 1;
+    margin-inline-end: var(--sidebar-w);
+    min-width: 0;
+    display: flex; flex-direction: column;
+}
+
+/* ---------- تاپ‌بار ---------- */
+.topbar {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 14px 26px;
+    background: var(--topbar-bg);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--border);
+}
+.topbar__title h1 { font-size: 19px; font-weight: 700; }
+.topbar__title p { font-size: 13px; color: var(--muted); }
+.topbar__actions { display: flex; align-items: center; gap: 10px; }
+
+.icon-btn {
+    width: 40px; height: 40px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-2); display: grid; place-items: center;
+    cursor: pointer; transition: var(--transition);
+}
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+.icon-btn svg { width: 20px; height: 20px; }
+
+.user-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px 6px 6px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface);
+}
+.user-chip__avatar {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px;
+}
+.user-chip__name { font-size: 13px; font-weight: 600; }
+
+.content { padding: 26px; flex: 1; }
+
+/* ==========================================================================
+   کارت‌ها و شبکه‌ها
+   ========================================================================== */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+.card__header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border);
+}
+.card__header h3 { font-size: 15px; font-weight: 700; }
+.card__header .sub { font-size: 12px; color: var(--muted); }
+.card__body { padding: 20px; }
+
+.section-title {
+    font-size: 15px; font-weight: 700; margin: 26px 4px 14px;
+    display: flex; align-items: center; gap: 8px;
+}
+.section-title:first-child { margin-top: 4px; }
+.section-title svg { width: 18px; height: 18px; color: var(--accent); }
+
+.grid { display: grid; gap: 18px; }
+.grid-stats { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ---------- کارت آماری ---------- */
+.stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex; align-items: flex-start; gap: 16px;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition), box-shadow var(--transition);
+    position: relative; overflow: hidden;
+}
+.stat:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.stat__icon {
+    width: 50px; height: 50px; border-radius: 14px;
+    display: grid; place-items: center; flex-shrink: 0;
+}
+.stat__icon svg { width: 24px; height: 24px; }
+.stat__value { font-size: 27px; font-weight: 700; line-height: 1.2; letter-spacing: -0.5px; }
+.stat__label { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+.i-accent { background: var(--accent-soft); color: var(--accent); }
+.i-success { background: var(--success-soft); color: var(--success); }
+.i-warning { background: var(--warning-soft); color: var(--warning); }
+.i-danger { background: var(--danger-soft); color: var(--danger); }
+.i-info { background: var(--info-soft); color: var(--info); }
+:root[data-theme="dark"] .i-accent { color: #a5b4fc; }
+
+/* ---------- صف Pipeline ---------- */
+.queue-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+    box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+}
+.queue-card::before {
+    content: ""; position: absolute; inset-block: 0; inset-inline-start: 0;
+    width: 4px; background: var(--accent);
+}
+.queue-card.q-scraper::before { background: var(--info); }
+.queue-card.q-ai::before { background: var(--warning); }
+.queue-card.q-publish::before { background: var(--success); }
+.queue-card__label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.queue-card__label svg { width: 16px; height: 16px; }
+.queue-card__value { font-size: 30px; font-weight: 700; margin-top: 6px; }
+.queue-card__hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* ==========================================================================
+   جدول‌ها
+   ========================================================================== */
+.table-wrap { overflow-x: auto; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 620px; }
+table.tbl thead th {
+    text-align: right; padding: 13px 16px; font-weight: 600;
+    color: var(--muted); font-size: 12.5px; white-space: nowrap;
+    border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+table.tbl tbody td {
+    padding: 13px 16px; border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+table.tbl tbody tr:last-child td { border-bottom: none; }
+table.tbl tbody tr { transition: background var(--transition); }
+table.tbl tbody tr:hover { background: var(--hover); }
+.td-strong { font-weight: 600; }
+.td-muted { color: var(--muted); font-size: 12.5px; }
+
+/* ==========================================================================
+   نشان‌ها (Badges)
+   ========================================================================== */
+.badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 30px; font-size: 12px; font-weight: 600;
+    white-space: nowrap;
+}
+.badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.badge-success { background: var(--success-soft); color: var(--success); }
+.badge-danger { background: var(--danger-soft); color: var(--danger); }
+.badge-warning { background: var(--warning-soft); color: var(--warning); }
+.badge-info { background: var(--info-soft); color: var(--info); }
+.badge-muted { background: var(--hover); color: var(--muted); }
+.badge-accent { background: var(--accent-soft); color: var(--accent); }
+
+/* ==========================================================================
+   نوار پیشرفت
+   ========================================================================== */
+.progress {
+    height: 8px; background: var(--hover); border-radius: 8px; overflow: hidden;
+    min-width: 90px;
+}
+.progress__bar { height: 100%; border-radius: 8px; background: var(--success); transition: width 0.6s ease; }
+.progress__bar.low { background: var(--danger); }
+.progress__bar.mid { background: var(--warning); }
+
+/* ==========================================================================
+   نمودارها
+   ========================================================================== */
+.chart-box { position: relative; height: 300px; }
+.chart-box.sm { height: 250px; }
+
+/* ==========================================================================
+   وضعیت انتشار (پلتفرم‌ها)
+   ========================================================================== */
+.platform-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm);
+}
+.platform-card__head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.platform-card__icon {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    font-weight: 700; color: #fff;
+}
+.pi-bale { background: linear-gradient(135deg, #1aa5a0, #0e7c78); }
+.pi-rubika { background: linear-gradient(135deg, #7b3fe4, #5a2bb0); }
+.pi-eitaa { background: linear-gradient(135deg, #f39325, #d97706); }
+.platform-card__name { font-weight: 700; font-size: 15px; }
+.platform-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.platform-metric {
+    text-align: center; padding: 12px 6px; background: var(--surface-2);
+    border-radius: var(--radius-sm);
+}
+.platform-metric__value { font-size: 20px; font-weight: 700; }
+.platform-metric__label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* ==========================================================================
+   گزارش‌های زمانی
+   ========================================================================== */
+.timeline-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.time-report {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; text-align: center;
+    box-shadow: var(--shadow-sm);
+}
+.time-report__value { font-size: 26px; font-weight: 700; color: var(--accent); }
+:root[data-theme="dark"] .time-report__value { color: #a5b4fc; }
+.time-report__label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+/* ==========================================================================
+   لاگ‌ها
+   ========================================================================== */
+.log-row { border-inline-start: 3px solid var(--border); }
+.log-row.log-INFO { border-inline-start-color: var(--info); }
+.log-row.log-SUCCESS { border-inline-start-color: var(--success); }
+.log-row.log-WARNING { border-inline-start-color: var(--warning); }
+.log-row.log-ERROR { border-inline-start-color: var(--danger); }
+.log-msg { font-size: 13px; max-width: 640px; word-break: break-word; }
+.log-level-INFO { color: var(--info); }
+.log-level-SUCCESS { color: var(--success); }
+.log-level-WARNING { color: var(--warning); }
+.log-level-ERROR { color: var(--danger); }
+
+/* ==========================================================================
+   مقالات (کارت)
+   ========================================================================== */
+.articles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 18px; }
+.article-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column; transition: transform var(--transition), box-shadow var(--transition);
+}
+.article-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.article-card__img {
+    height: 168px; background: var(--surface-2); position: relative; overflow: hidden;
+}
+.article-card__img img { width: 100%; height: 100%; object-fit: cover; }
+.article-card__img .noimg { width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted); }
+.article-card__img .noimg svg { width: 40px; height: 40px; opacity: 0.4; }
+.article-card__badges { position: absolute; top: 10px; inset-inline-start: 10px; display: flex; gap: 6px; }
+.article-card__body { padding: 16px; display: flex; flex-direction: column; flex: 1; }
+.article-card__title { font-size: 14.5px; font-weight: 700; line-height: 1.6; margin-bottom: 10px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.article-card__meta { display: flex; align-items: center; justify-content: space-between;
+    margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+
+/* ==========================================================================
+   فرم‌ها و کنترل‌ها
+   ========================================================================== */
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
+.input, .select {
+    font-family: var(--font); font-size: 13.5px;
+    padding: 10px 14px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    transition: var(--transition); outline: none;
+}
+.input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input { min-width: 220px; }
+.search-box { position: relative; }
+.search-box svg { position: absolute; inset-inline-start: 12px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; color: var(--muted); pointer-events: none; }
+.search-box .input { padding-inline-start: 40px; }
+
+.btn {
+    font-family: var(--font); font-size: 13.5px; font-weight: 600;
+    padding: 10px 18px; border-radius: var(--radius-sm); border: 1px solid transparent;
+    cursor: pointer; transition: var(--transition); display: inline-flex; align-items: center; gap: 7px;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost { background: var(--surface); color: var(--text-2); border-color: var(--border); }
+.btn-ghost:hover { background: var(--hover); }
+.btn svg { width: 17px; height: 17px; }
+
+/* ---------- صفحه‌بندی ---------- */
+.pagination { display: flex; gap: 6px; align-items: center; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
+.pagination a, .pagination span {
+    min-width: 38px; height: 38px; padding: 0 10px; border-radius: var(--radius-sm);
+    display: grid; place-items: center; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+    transition: var(--transition);
+}
+.pagination a:hover { background: var(--hover); }
+.pagination .current { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pagination .disabled { opacity: 0.4; pointer-events: none; }
+
+/* ---------- خالی ---------- */
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state svg { width: 56px; height: 56px; opacity: 0.35; margin-bottom: 14px; }
+.empty-state p { font-size: 14px; }
+
+/* ==========================================================================
+   صفحه‌ی ورود
+   ========================================================================== */
+.login-page {
+    min-height: 100vh; display: grid; place-items: center; padding: 20px;
+    background:
+        radial-gradient(1200px 600px at 100% 0%, var(--accent-soft), transparent 60%),
+        radial-gradient(1000px 500px at 0% 100%, rgba(124, 58, 237, 0.10), transparent 55%),
+        var(--bg);
+}
+.login-card {
+    width: 100%; max-width: 410px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 22px; padding: 38px 34px;
+    box-shadow: var(--shadow);
+}
+.login-card__logo {
+    width: 62px; height: 62px; border-radius: 18px; margin: 0 auto 18px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; color: #fff; box-shadow: 0 10px 26px var(--accent-soft);
+}
+.login-card__logo svg { width: 32px; height: 32px; }
+.login-card h2 { text-align: center; font-size: 21px; font-weight: 700; }
+.login-card .subtitle { text-align: center; color: var(--muted); font-size: 13px; margin-top: 6px; margin-bottom: 26px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 7px; color: var(--text-2); }
+.form-control {
+    width: 100%; font-family: var(--font); font-size: 14px;
+    padding: 12px 16px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    transition: var(--transition); outline: none;
+}
+.form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--surface); }
+.btn-block { width: 100%; justify-content: center; padding: 13px; font-size: 15px; margin-top: 6px; }
+.alert { padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 18px; font-weight: 500; }
+.alert-error { background: var(--danger-soft); color: var(--danger); }
+.login-footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 22px; }
+
+/* ==========================================================================
+   واکنش‌گرا (Responsive)
+   ========================================================================== */
+.menu-toggle { display: none; }
+.sidebar__backdrop { display: none; }
+
+@media (max-width: 1024px) {
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .timeline-row { grid-template-columns: repeat(3, 1fr); }
+    .platform-metrics { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (max-width: 860px) {
+    .sidebar { transform: translateX(100%); box-shadow: var(--shadow); }
+    .sidebar.open { transform: translateX(0); }
+    .main { margin-inline-end: 0; }
+    .menu-toggle { display: grid; }
+    .sidebar__backdrop.show {
+        display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 39;
+    }
+    .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    .timeline-row { grid-template-columns: repeat(2, 1fr); }
+    .content { padding: 18px; }
+    .topbar { padding: 12px 16px; }
+}
+
+@media (max-width: 520px) {
+    .grid-4 { grid-template-columns: 1fr; }
+    .timeline-row { grid-template-columns: 1fr; }
+    .platform-metrics { grid-template-columns: repeat(2, 1fr); }
+    .user-chip__name { display: none; }
+    .topbar__title p { display: none; }
+}

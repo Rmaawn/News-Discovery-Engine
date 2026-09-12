@@ -3,3 +3,5 @@ beautifulsoup4
 sqlalchemy
 python-dotenv
 openai
+flask
+waitress

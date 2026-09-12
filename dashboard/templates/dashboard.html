@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}داشبورد{% endblock %}
+{% block page_title %}داشبورد{% endblock %}
+{% block page_subtitle %}نمای کلی وضعیت سیستم و آمار لحظه‌ای{% endblock %}
+
+{% block content %}
+
+{# ============ آمار کلی ============ #}
+<div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    آمار کلی
+</div>
+<div class="grid grid-stats">
+    <div class="stat">
+        <div class="stat__icon i-accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></div>
+        <div><div class="stat__value">{{ stats.total_links|fa_num }}</div><div class="stat__label">لینک‌های کشف‌شده</div></div>
+    </div>
+    <div class="stat">
+        <div class="stat__icon i-info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8M10 9H8"/></svg></div>
+        <div><div class="stat__value">{{ stats.total_articles|fa_num }}</div><div class="stat__label">مقالات استخراج‌شده</div></div>
+    </div>
+    <div class="stat">
+        <div class="stat__icon i-warning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg></div>
+        <div><div class="stat__value">{{ stats.total_rewritten|fa_num }}</div><div class="stat__label">مقالات بازنویسی‌شده</div></div>
+    </div>
+    <div class="stat">
+        <div class="stat__icon i-success"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></div>
+        <div><div class="stat__value">{{ stats.publish_success|fa_num }}</div><div class="stat__label">انتشار موفق</div></div>
+    </div>
+    <div class="stat">
+        <div class="stat__icon i-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg></div>
+        <div><div class="stat__value">{{ stats.publish_failed|fa_num }}</div><div class="stat__label">انتشار ناموفق</div></div>
+    </div>
+    <div class="stat">
+        <div class="stat__icon i-accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></svg></div>
+        <div><div class="stat__value">{{ stats.total_sources|fa_num }}</div><div class="stat__label">منابع خبری</div></div>
+    </div>
+</div>
+
+{# ============ وضعیت Pipeline ============ #}
+<div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    وضعیت Pipeline — آیتم‌های در انتظار هر فاز
+</div>
+<div class="grid grid-4">
+    <div class="queue-card q-crawl">
+        <div class="queue-card__label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></svg> صف کراول</div>
+        <div class="queue-card__value">{{ queues.crawl_queue|fa_num }}</div>
+        <div class="queue-card__hint">منابع آماده‌ی کشف</div>
+    </div>
+    <div class="queue-card q-scraper">
+        <div class="queue-card__label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Z"/></svg> صف اسکرپر</div>
+        <div class="queue-card__value">{{ queues.scraper_queue|fa_num }}</div>
+        <div class="queue-card__hint">لینک‌های در انتظار استخراج</div>
+    </div>
+    <div class="queue-card q-ai">
+        <div class="queue-card__label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg> صف هوش مصنوعی</div>
+        <div class="queue-card__value">{{ queues.ai_queue|fa_num }}</div>
+        <div class="queue-card__hint">مقالات در انتظار بازنویسی</div>
+    </div>
+    <div class="queue-card q-publish">
+        <div class="queue-card__label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg> صف انتشار</div>
+        <div class="queue-card__value">{{ queues.publish_queue|fa_num }}</div>
+        <div class="queue-card__hint">مقالات در انتظار انتشار</div>
+    </div>
+</div>
+
+{# ============ نمودارها ============ #}
+<div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8" rx="1"/><rect x="12" y="6" width="3" height="12" rx="1"/><rect x="17" y="13" width="3" height="5" rx="1"/></svg>
+    نمودارها و تحلیل‌ها
+</div>
+<div class="grid grid-2">
+    <div class="card">
+        <div class="card__header"><h3>روند انتشار روزانه</h3><span class="sub">۱۴ روز اخیر</span></div>
+        <div class="card__body"><div class="chart-box"><canvas id="chart-daily"></canvas></div></div>
+    </div>
+    <div class="card">
+        <div class="card__header"><h3>روند رشد سیستم</h3><span class="sub">مجموع مقالات</span></div>
+        <div class="card__body"><div class="chart-box"><canvas id="chart-growth"></canvas></div></div>
+    </div>
+</div>
+<div class="grid grid-3" style="margin-top:18px">
+    <div class="card">
+        <div class="card__header"><h3>نرخ موفقیت انتشار</h3></div>
+        <div class="card__body"><div class="chart-box sm"><canvas id="chart-publish-rate"></canvas></div></div>
+    </div>
+    <div class="card">
+        <div class="card__header"><h3>نرخ موفقیت هوش مصنوعی</h3></div>
+        <div class="card__body"><div class="chart-box sm"><canvas id="chart-ai-rate"></canvas></div></div>
+    </div>
+    <div class="card">
+        <div class="card__header"><h3>انتشار به تفکیک پلتفرم</h3></div>
+        <div class="card__body"><div class="chart-box sm"><canvas id="chart-platforms"></canvas></div></div>
+    </div>
+</div>
+<div class="grid" style="margin-top:18px">
+    <div class="card">
+        <div class="card__header"><h3>تعداد مقالات هر خبرگزاری</h3></div>
+        <div class="card__body"><div class="chart-box"><canvas id="chart-sources"></canvas></div></div>
+    </div>
+</div>
+
+{# ============ وضعیت انتشار (پلتفرم‌ها) ============ #}
+<div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>
+    وضعیت انتشار به تفکیک پلتفرم
+</div>
+<div class="grid grid-3">
+    {% for p in publish_status %}
+    <div class="platform-card">
+        <div class="platform-card__head">
+            <div class="platform-card__icon pi-{{ p.icon }}">{{ p.label[0] }}</div>
+            <div><div class="platform-card__name">{{ p.label }}</div><div class="td-muted">مجموع: {{ p.total|fa_num }}</div></div>
+        </div>
+        <div class="platform-metrics">
+            <div class="platform-metric"><div class="platform-metric__value">{{ p.today|fa_num }}</div><div class="platform-metric__label">امروز</div></div>
+            <div class="platform-metric"><div class="platform-metric__value">{{ p.week|fa_num }}</div><div class="platform-metric__label">این هفته</div></div>
+            <div class="platform-metric"><div class="platform-metric__value">{{ p.month|fa_num }}</div><div class="platform-metric__label">این ماه</div></div>
+            <div class="platform-metric"><div class="platform-metric__value">{{ p.total|fa_num }}</div><div class="platform-metric__label">کل</div></div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ============ گزارش‌های زمانی ============ #}
+<div class="section-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    گزارش‌های زمانی — انتشار موفق
+</div>
+<div class="timeline-row">
+    {% for r in time_reports %}
+    <div class="time-report">
+        <div class="time-report__value">{{ r.value|fa_num }}</div>
+        <div class="time-report__label">{{ r.label }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ============ وضعیت هر خبرگزاری + سلامت ============ #}
+<div class="grid grid-2" style="margin-top:26px">
+    <div class="card" style="grid-column: 1 / -1">
+        <div class="card__header">
+            <h3>وضعیت هر خبرگزاری</h3>
+            <span class="sub">
+                <span class="badge badge-success"><span class="dot"></span>سالم: {{ health.summary.healthy|fa_num }}</span>
+                <span class="badge badge-warning"><span class="dot"></span>تلاش مجدد: {{ health.summary.retrying|fa_num }}</span>
+                <span class="badge badge-danger"><span class="dot"></span>مسدود: {{ health.summary.blocked|fa_num }}</span>
+            </span>
+        </div>
+        <div class="card__body" style="padding:0">
+            <div class="table-wrap">
+                <table class="tbl">
+                    <thead><tr>
+                        <th>خبرگزاری</th><th>لینک کشف‌شده</th><th>مقاله استخراج‌شده</th>
+                        <th>رد شده</th><th>آخرین کراول</th><th>وضعیت سلامت</th><th>Circuit Breaker</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for s in sources_status %}
+                        <tr>
+                            <td class="td-strong">{{ s.name }}</td>
+                            <td>{{ s.links|fa_num }}</td>
+                            <td>{{ s.articles|fa_num }}</td>
+                            <td>{{ s.rejected|fa_num }}</td>
+                            <td class="td-muted">{{ s.last_crawl|jalali }}</td>
+                            <td>
+                                {% if s.health.key == 'healthy' %}<span class="badge badge-success"><span class="dot"></span>سالم</span>
+                                {% elif s.health.key == 'retrying' %}<span class="badge badge-warning"><span class="dot"></span>تلاش مجدد</span>
+                                {% else %}<span class="badge badge-danger"><span class="dot"></span>مسدود</span>{% endif %}
+                            </td>
+                            <td>
+                                {% if s.health.circuit_open %}<span class="badge badge-danger">فعال</span>
+                                {% else %}<span class="badge badge-muted">بسته</span>{% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# داده‌ی نمودارها برای رندر سمت کلاینت #}
+<script id="charts-data" type="application/json">{{ charts|tojson }}</script>
+{% endblock %}

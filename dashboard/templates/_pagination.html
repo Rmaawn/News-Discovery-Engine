@@ -1,0 +1,35 @@
+{% macro render_pagination(data, endpoint, extra={}) %}
+{% if data.pages > 1 %}
+<nav class="pagination">
+    {% if data.page > 1 %}
+        <a href="{{ url_for(endpoint, page=data.page-1, **extra) }}">قبلی</a>
+    {% else %}
+        <span class="disabled">قبلی</span>
+    {% endif %}
+
+    {% set start = [data.page-2, 1]|max %}
+    {% set end = [data.page+2, data.pages]|min %}
+    {% if start > 1 %}
+        <a href="{{ url_for(endpoint, page=1, **extra) }}">۱</a>
+        {% if start > 2 %}<span class="disabled">…</span>{% endif %}
+    {% endif %}
+    {% for p in range(start, end+1) %}
+        {% if p == data.page %}
+            <span class="current">{{ p|fa_num }}</span>
+        {% else %}
+            <a href="{{ url_for(endpoint, page=p, **extra) }}">{{ p|fa_num }}</a>
+        {% endif %}
+    {% endfor %}
+    {% if end < data.pages %}
+        {% if end < data.pages-1 %}<span class="disabled">…</span>{% endif %}
+        <a href="{{ url_for(endpoint, page=data.pages, **extra) }}">{{ data.pages|fa_num }}</a>
+    {% endif %}
+
+    {% if data.page < data.pages %}
+        <a href="{{ url_for(endpoint, page=data.page+1, **extra) }}">بعدی</a>
+    {% else %}
+        <span class="disabled">بعدی</span>
+    {% endif %}
+</nav>
+{% endif %}
+{% endmacro %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}منابع خبری{% endblock %}
+{% block page_title %}منابع خبری{% endblock %}
+{% block page_subtitle %}وضعیت کراول، استخراج و سلامت هر منبع{% endblock %}
+
+{% block content %}
+<div class="grid grid-3">
+    {% for s in sources %}
+    <div class="card">
+        <div class="card__header">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div class="stat__icon i-accent" style="width:42px;height:42px">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></svg>
+                </div>
+                <div>
+                    <h3>{{ s.name }}</h3>
+                    <span class="sub">{{ s.base_url }}</span>
+                </div>
+            </div>
+            {% if s.health.key == 'healthy' %}<span class="badge badge-success"><span class="dot"></span>سالم</span>
+            {% elif s.health.key == 'retrying' %}<span class="badge badge-warning"><span class="dot"></span>تلاش مجدد</span>
+            {% else %}<span class="badge badge-danger"><span class="dot"></span>مسدود</span>{% endif %}
+        </div>
+        <div class="card__body">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;">
+                <div>
+                    <div class="td-muted">تعداد کراول</div>
+                    <div style="font-size:22px; font-weight:700">{{ s.crawl_count|fa_num }}</div>
+                </div>
+                <div>
+                    <div class="td-muted">تعداد Fetch</div>
+                    <div style="font-size:22px; font-weight:700">{{ s.fetch_count|fa_num }}</div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:14px">
+                <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;">
+                    <span class="td-muted">درصد موفقیت</span>
+                    <span class="td-strong">{{ s.success_rate|fa_num }}٪</span>
+                </div>
+                <div class="progress">
+                    <div class="progress__bar {{ 'low' if s.success_rate < 40 else 'mid' if s.success_rate < 70 else '' }}" style="width: {{ s.success_rate }}%"></div>
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--border); font-size:12.5px;">
+                <span class="td-muted">آخرین کراول</span>
+                <span>{{ s.last_crawl|jalali }}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12.5px;">
+                <span class="td-muted">Circuit Breaker</span>
+                {% if s.health.circuit_open %}<span class="badge badge-danger">فعال</span>{% else %}<span class="badge badge-muted">بسته</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

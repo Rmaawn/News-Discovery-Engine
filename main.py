@@ -23,6 +23,27 @@ GAP_SECONDS = 3
 RETRY_SLEEP_SECONDS = 15
 
 
+# =========================================================================
+# داشبورد مانیتورینگ (لایه‌ی فقط-خواندنی)
+# -------------------------------------------------------------------------
+# داشبورد در یک Thread پس‌زمینه اجرا می‌شود تا در همان پروسه‌ی Scheduler،
+# هم آدرس وب سرویس (مثلاً https://tadna.liara.run) داشبورد را نمایش دهد و
+# هم به وضعیت زنده‌ی Circuit Breaker دسترسی داشته باشد.
+#
+# این بخش کاملاً «افزودنی» است و هیچ تغییری در منطق چهار فاز اصلی یا
+# Scheduler ایجاد نمی‌کند. با تنظیم DASHBOARD_ENABLED=false غیرفعال می‌شود.
+# =========================================================================
+import os
+import threading
+
+
+def _dashboard_enabled() -> bool:
+    """آیا داشبورد فعال است؟ (پیش‌فرض: بله)"""
+    return os.getenv("DASHBOARD_ENABLED", "true").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
 def run_phase(name, func):
     logger.info(f"Starting phase: {name}")
     start = time.time()
@@ -104,5 +125,38 @@ def main():
             )
 
 
+def _run_scheduler_forever() -> None:
+    """اجرای Scheduler (چهار فاز خبری + پایپ‌لاین سلامت) — منطق کاملاً بدون تغییر."""
+    try:
+        main()
+    except Exception as e:  # نباید هرگز پروسه را کامل بیندازد
+        logger.error(f"Scheduler stopped unexpectedly: {e}")
+
+
 if __name__ == "__main__":
-    main()
+    # =====================================================================
+    # روی Liara فقط main.py اجرا می‌شود. برای اینکه آدرس سرویس
+    # (مثلاً https://tadna.liara.run) «همیشه» داشبورد را نشان دهد، وب‌سرور در
+    # Thread «اصلی/foreground» اجرا می‌شود و Scheduler در پس‌زمینه.
+    # مزیت: حتی اگر Scheduler به هر دلیلی متوقف شود، پورت وب باز می‌ماند و
+    # سرویس 502 نمی‌گیرد. منطق چهار فاز کاملاً دست‌نخورده است؛ فقط محلِ اجرا
+    # (کدام Thread) عوض شده است. با DASHBOARD_ENABLED=false داشبورد خاموش
+    # می‌شود و رفتار دقیقاً مثل قبل (فقط Scheduler) خواهد بود.
+    # =====================================================================
+    if _dashboard_enabled():
+        scheduler_thread = threading.Thread(
+            target=_run_scheduler_forever, name="scheduler", daemon=True,
+        )
+        scheduler_thread.start()
+        logger.success("Scheduler started in background; serving dashboard in foreground.")
+        try:
+            from dashboard.server import serve
+
+            serve()  # Blocking روی Thread اصلی
+        except Exception as e:
+            # اگر وب‌سرور بالا نیامد، Pipeline نباید بمیرد: پروسه را زنده نگه دار.
+            logger.error(f"Dashboard web server failed to start ({e}); scheduler keeps running.")
+            scheduler_thread.join()
+    else:
+        # داشبورد غیرفعال است: رفتار قبلی، فقط Scheduler.
+        main()

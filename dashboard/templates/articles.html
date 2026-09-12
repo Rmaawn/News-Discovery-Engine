@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block title %}مقالات{% endblock %}
+{% block page_title %}مقالات{% endblock %}
+{% block page_subtitle %}مجموع {{ data.total|fa_num }} مقاله استخراج‌شده{% endblock %}
+
+{% block content %}
+<form class="toolbar" method="get" action="{{ url_for('dashboard.articles') }}">
+    <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" name="q" class="input" placeholder="جستجو در عنوان مقالات..." value="{{ search }}">
+    </div>
+    <select name="sort" class="select" onchange="this.form.submit()">
+        <option value="newest" {{ 'selected' if sort=='newest' }}>جدیدترین</option>
+        <option value="oldest" {{ 'selected' if sort=='oldest' }}>قدیمی‌ترین</option>
+        <option value="title" {{ 'selected' if sort=='title' }}>بر اساس عنوان</option>
+    </select>
+    <button type="submit" class="btn btn-primary">جستجو</button>
+    {% if search %}<a href="{{ url_for('dashboard.articles') }}" class="btn btn-ghost">حذف فیلتر</a>{% endif %}
+</form>
+
+{% if data.rows %}
+<div class="articles-grid">
+    {% for a in data.rows %}
+    <div class="article-card">
+        <div class="article-card__img">
+            {% if a.image_url %}
+                <img src="{{ a.image_url }}" alt="" loading="lazy"
+                     onerror="this.parentNode.innerHTML='<div class=\'noimg\'><svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'1.5\'><rect x=\'3\' y=\'3\' width=\'18\' height=\'18\' rx=\'2\'/><circle cx=\'9\' cy=\'9\' r=\'2\'/><path d=\'m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21\'/></svg></div>'">
+            {% else %}
+                <div class="noimg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></div>
+            {% endif %}
+            <div class="article-card__badges">
+                {% if a.has_ai %}<span class="badge badge-accent">هوش مصنوعی ✓</span>{% else %}<span class="badge badge-muted">بدون AI</span>{% endif %}
+                {% if a.published_on %}<span class="badge badge-success">منتشر شد</span>{% endif %}
+            </div>
+        </div>
+        <div class="article-card__body">
+            <div class="article-card__title">{{ a.title }}</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                {% for pl in a.published_on %}<span class="badge badge-info" style="font-size:11px">{{ pl }}</span>{% endfor %}
+            </div>
+            <div class="article-card__meta">
+                <span class="badge badge-muted">{{ a.source }}</span>
+                <span>{{ a.created_at|jalali_date }}</span>
+            </div>
+            {% if a.source_url %}
+            <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="btn btn-ghost" style="margin-top:12px; justify-content:center; font-size:12.5px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                لینک اصلی خبر
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{{ render_pagination(data, 'dashboard.articles', {'q': search, 'sort': sort}) }}
+{% else %}
+<div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Z"/></svg>
+    <p>مقاله‌ای یافت نشد.</p>
+</div>
+{% endif %}
+{% endblock %}

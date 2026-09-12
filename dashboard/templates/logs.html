@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block title %}لاگ سیستم{% endblock %}
+{% block page_title %}لاگ سیستم{% endblock %}
+{% block page_subtitle %}مجموع {{ data.total|fa_num }} رکورد لاگ{% endblock %}
+
+{% block content %}
+<form class="toolbar" method="get" action="{{ url_for('dashboard.logs') }}">
+    <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" name="q" class="input" placeholder="جستجو در پیام‌ها و ماژول‌ها..." value="{{ search }}">
+    </div>
+    <select name="level" class="select" onchange="this.form.submit()">
+        <option value="">همه‌ی سطوح</option>
+        <option value="INFO" {{ 'selected' if level=='INFO' }}>INFO</option>
+        <option value="SUCCESS" {{ 'selected' if level=='SUCCESS' }}>SUCCESS</option>
+        <option value="WARNING" {{ 'selected' if level=='WARNING' }}>WARNING</option>
+        <option value="ERROR" {{ 'selected' if level=='ERROR' }}>ERROR</option>
+    </select>
+    <button type="submit" class="btn btn-primary">اعمال</button>
+    {% if search or level %}<a href="{{ url_for('dashboard.logs') }}" class="btn btn-ghost">حذف فیلتر</a>{% endif %}
+
+    <div style="margin-inline-start:auto; display:flex; gap:8px; flex-wrap:wrap;">
+        <span class="badge badge-info">INFO: {{ (data.level_counts.get('INFO',0))|fa_num }}</span>
+        <span class="badge badge-success">SUCCESS: {{ (data.level_counts.get('SUCCESS',0))|fa_num }}</span>
+        <span class="badge badge-warning">WARNING: {{ (data.level_counts.get('WARNING',0))|fa_num }}</span>
+        <span class="badge badge-danger">ERROR: {{ (data.level_counts.get('ERROR',0))|fa_num }}</span>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card__body" style="padding:0">
+        {% if data.rows %}
+        <div class="table-wrap">
+            <table class="tbl">
+                <thead><tr>
+                    <th style="width:80px">سطح</th><th style="width:150px">ماژول</th><th>پیام</th><th style="width:160px">زمان</th>
+                </tr></thead>
+                <tbody>
+                {% for log in data.rows %}
+                    <tr class="log-row log-{{ log.level }}">
+                        <td><span class="log-level-{{ log.level }}" style="font-weight:700; font-size:12px">{{ log.level }}</span></td>
+                        <td class="td-muted">{{ log.module or '—' }}</td>
+                        <td><div class="log-msg">{{ log.message }}</div></td>
+                        <td class="td-muted">{{ log.created_at|jalali }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+            <p>لاگی یافت نشد.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{{ render_pagination(data, 'dashboard.logs', {'q': search, 'level': level}) }}
+{% endblock %}

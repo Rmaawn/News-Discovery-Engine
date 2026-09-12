@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block title %}تاریخچه انتشار{% endblock %}
+{% block page_title %}تاریخچه انتشار{% endblock %}
+{% block page_subtitle %}مجموع {{ data.total|fa_num }} رکورد انتشار{% endblock %}
+
+{% block content %}
+<form class="toolbar" method="get" action="{{ url_for('dashboard.publish') }}">
+    <select name="platform" class="select" onchange="this.form.submit()">
+        <option value="">همه‌ی پلتفرم‌ها</option>
+        {% for p in data.platforms %}
+            <option value="{{ p.key }}" {{ 'selected' if platform==p.key }}>{{ p.label }}</option>
+        {% endfor %}
+    </select>
+    <select name="status" class="select" onchange="this.form.submit()">
+        <option value="">همه‌ی وضعیت‌ها</option>
+        <option value="success" {{ 'selected' if status=='success' }}>موفق</option>
+        <option value="failed" {{ 'selected' if status=='failed' }}>ناموفق</option>
+        <option value="pending" {{ 'selected' if status=='pending' }}>در انتظار</option>
+    </select>
+    {% if platform or status %}<a href="{{ url_for('dashboard.publish') }}" class="btn btn-ghost">حذف فیلتر</a>{% endif %}
+</form>
+
+<div class="card">
+    <div class="card__body" style="padding:0">
+        {% if data.rows %}
+        <div class="table-wrap">
+            <table class="tbl">
+                <thead><tr>
+                    <th>مقاله</th><th>خبرگزاری</th><th>پلتفرم</th><th>وضعیت</th><th>زمان</th><th>پیام خطا</th>
+                </tr></thead>
+                <tbody>
+                {% for item in data.rows %}
+                    <tr>
+                        <td class="td-strong" style="max-width:320px">{{ item.article_title }}</td>
+                        <td><span class="badge badge-muted">{{ item.source }}</span></td>
+                        <td><span class="badge badge-accent">{{ item.platform }}</span></td>
+                        <td>
+                            {% if item.status == 'success' %}<span class="badge badge-success"><span class="dot"></span>موفق</span>
+                            {% elif item.status == 'failed' %}<span class="badge badge-danger"><span class="dot"></span>ناموفق</span>
+                            {% else %}<span class="badge badge-warning"><span class="dot"></span>در انتظار</span>{% endif %}
+                        </td>
+                        <td class="td-muted">{{ item.created_at|jalali }}</td>
+                        <td class="td-muted" style="max-width:260px; color:var(--danger)">{{ item.error_message or '—' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            <p>رکورد انتشاری یافت نشد.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{{ render_pagination(data, 'dashboard.publish', {'platform': platform, 'status': status}) }}
+{% endblock %}
